@@ -1,0 +1,11 @@
+# 데이터 파일 (나중에 필요하면 뺍니다)
+data/
+error_log.txt
+
+# 파이썬 캐시
+__pycache__/
+*.pyc
+
+# 가상환경 및 설정
+.venv/
+.DS_Store
