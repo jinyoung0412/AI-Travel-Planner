@@ -1,6 +1,6 @@
 {
     // 1. 파이썬 경로 지정 (아까 확인한 경로가 맞는지 확인!)
-    "python.defaultInterpreterPath": "C:\\ProgramData\\miniconda3\\envs\\travel-ai\\python.exe",
+    "python.defaultInterpreterPath": "C:\\ProgramData\\miniconda3\\envs\\travel_planner_env\\python.exe",
 
     // 2. 터미널 프로필 설정 (여기가 핵심 ⭐)
     "terminal.integrated.profiles.windows": {
@@ -9,7 +9,7 @@
             "args": [
                 "-NoExit",
                 "-Command",
-                "conda activate travel-ai" // 터미널 켜지자마자 이 명령어 실행!
+               "conda activate travel_planner_env"
             ]
         }
     },
