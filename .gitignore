@@ -9,3 +9,4 @@ __pycache__/
 # 가상환경 및 설정
 .venv/
 .DS_Store
+.env
