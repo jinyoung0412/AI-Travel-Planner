@@ -1,33 +1,34 @@
-// server.js
 const express = require('express');
-const cors = require('cors');
+const axios = require('axios');
 const app = express();
-const port = 3000; // 서버 포트 번호
+const PORT = 8080; // 👈 여기를 8080으로 맞춰야 합니다!
 
-// 1. 보안 설정 (모든 곳에서 접속 허용)
-app.use(cors());
-
-// 2. JSON 데이터 해석기 장착 (앱에서 보낸 데이터 읽으려면 필수)
 app.use(express.json());
 
-// [테스트 1] 주소창에 쳤을 때 (GET 요청)
-app.get('/', (req, res) => {
-    res.send('Node.js 서버 작동 시작 (Team Lead Server)');
+// [API] 앱(Flutter)에서 여행 추천 요청을 받는 곳
+app.post('/api/recommend', async (req, res) => {
+    console.log('📱 [Node] 앱에서 요청 도착:', req.body);
+
+    try {
+        // 1. Node.js가 데이터를 들고 Flask AI 서버(5000번)로 달려감
+        // 주의: Flask 주소는 보통 127.0.0.1:5000 사용
+        const flaskResponse = await axios.post('http://127.0.0.1:5000/ai-predict', req.body);
+        
+        console.log('🤖 [Node] Flask 응답 받음:', flaskResponse.data);
+
+        // 2. AI 결과를 앱에게 최종 전달
+        res.json({
+            success: true,
+            message: "AI 추천 완료",
+            data: flaskResponse.data
+        });
+
+    } catch (error) {
+        console.error('🔥 [Node] Flask 통신 에러:', error.message);
+        res.status(500).json({ success: false, message: "AI 서버 연결 실패" });
+    }
 });
 
-// [테스트 2] 앱에서 데이터 보냈을 때 (POST 요청)
-app.post('/api/test', (req, res) => {
-    const clientData = req.body;
-    console.log("📱 앱에서 받은 데이터:", clientData);
-
-    // 잘 받았다고 응답해주기
-    res.json({
-        message: "데이터 수신 완료.",
-        yourData: clientData
-    });
-});
-
-// 서버 시작
-app.listen(port, () => {
-    console.log(`✅ 서버가 http://localhost:${port} 에서 대기 중입니다.`);
+app.listen(PORT, () => {
+    console.log(`🚀 Node.js 서버 실행 중: http://localhost:${PORT}`); // 👈 이제 8080으로 뜰 겁니다
 });
