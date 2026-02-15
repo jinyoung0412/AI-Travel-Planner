@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:ai_travel_app/travel_input_screen.dart';
+import 'api_service.dart';
 
-void main() {
+//코드 임시 백업
+/* void main() {
   runApp(const MyApp());
 }
 
@@ -59,6 +61,43 @@ class HomeScreen extends StatelessWidget {
               child: const Text('여행 코스 추천받기'),
             ),
           ],
+        ),
+      ),
+    );
+  }
+} */
+import 'package:flutter/material.dart';
+import 'api_service.dart'; // 방금 만든 통신 파일 가져오기
+
+void main() {
+  runApp(const MyApp());
+}
+
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      home: Scaffold(
+        appBar: AppBar(title: const Text("AI 서버 연동 테스트")),
+        body: Center(
+          child: ElevatedButton(
+            onPressed: () async {
+              print("🔵 [앱] AI 추천 요청 보냄...");
+
+              try {
+                // 팀장님이 만든 그 함수 호출!
+                var result = await ApiService.getRecommendation(["바다", "힐링"], 2);
+
+                // 성공하면 앱 화면에 로그 출력 안 해도 콘솔에 뜸
+                print("🟢 [앱] 결과 도착: $result");
+              } catch (e) {
+                print("🔴 [앱] 에러 발생: $e");
+              }
+            },
+            child: const Text("AI한테 여행지 추천받기 (클릭)"),
+          ),
         ),
       ),
     );
