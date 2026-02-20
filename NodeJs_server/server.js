@@ -1,34 +1,44 @@
 const express = require('express');
 const axios = require('axios');
+const cors = require('cors');
+
 const app = express();
-const PORT = 8080; // 👈 여기를 8080으로 맞춰야 합니다!
-
 app.use(express.json());
+app.use(cors());
 
-// [API] 앱(Flutter)에서 여행 추천 요청을 받는 곳
-app.post('/api/recommend', async (req, res) => {
-    console.log('📱 [Node] 앱에서 요청 도착:', req.body);
+// 파이썬 Flask 서버 주소
+const FLASK_SERVER_URL = 'http://127.0.0.1:5000/ai-predict';
 
+// 앱에서 POST 요청으로 /ai-predict 주소로 접근했을 때 실행됨
+app.post('/ai-predict', async (req, res) => {
     try {
-        // 1. Node.js가 데이터를 들고 Flask AI 서버(5000번)로 달려감
-        // 주의: Flask 주소는 보통 127.0.0.1:5000 사용
-        const flaskResponse = await axios.post('http://127.0.0.1:5000/ai-predict', req.body);
+        console.log("📦 [Node.js] 앱에서 받은 데이터:", req.body);
         
-        console.log('🤖 [Node] Flask 응답 받음:', flaskResponse.data);
+        // 1. 받은 데이터를 그대로 Flask 서버로 쏴줌
+        const flaskResponse = await axios.post(FLASK_SERVER_URL, req.body);
+        
+        console.log("✅ [Node.js] Flask에서 받은 응답:", flaskResponse.data);
 
-        // 2. AI 결과를 앱에게 최종 전달
-        res.json({
+        // 2. Flask의 결과를 앱이 읽기 편한 규격(success, data 등)으로 포장해서 응답
+        res.status(200).json({
             success: true,
             message: "AI 추천 완료",
             data: flaskResponse.data
         });
-
+        
     } catch (error) {
-        console.error('🔥 [Node] Flask 통신 에러:', error.message);
-        res.status(500).json({ success: false, message: "AI 서버 연결 실패" });
+        console.error("🔥 [Node.js] 에러 발생:", error.message);
+        
+        // Flask 서버가 꺼져있거나 통신에 실패했을 때 500 에러를 앱으로 보냄
+        res.status(500).json({
+            success: false,
+            message: "AI 서버 통신 에러",
+            error: error.message
+        });
     }
 });
 
+const PORT = 8080;
 app.listen(PORT, () => {
-    console.log(`🚀 Node.js 서버 실행 중: http://localhost:${PORT}`); // 👈 이제 8080으로 뜰 겁니다
+    console.log(`🚀 [Node] 서버가 ${PORT} 포트에서 실행 중입니다.`);
 });

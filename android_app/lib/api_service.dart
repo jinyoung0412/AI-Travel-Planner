@@ -2,38 +2,43 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 class ApiService {
-  // 🚨 [에뮬레이터 전용 특수 IP]
-  // localhost(127.0.0.1) 대신 10.0.2.2를 써야 컴퓨터의 서버와 연결됩니다.
-  static const String baseUrl = "http://10.0.2.2:8080";
+  // 에뮬레이터에서 로컬 Node.js 서버에 접근하기 위한 IP (10.0.2.2)
+  // 실물 폰 연결 시에는 컴퓨터의 실제 IP(예: 192.168.x.x)를 입력해야 합니다.
+  static const String baseUrl = 'http://10.0.2.2:8080';
 
-  // AI 여행 코스 추천 요청 함수
-  static Future<Map<String, dynamic>> getRecommendation(List<String> tags, int days) async {
-    final url = Uri.parse('$baseUrl/api/recommend');
-
+  // 모든 여행 정보를 받아서 서버로 전송하는 함수
+  static Future<Map<String, dynamic>?> getRecommendation({
+    required String transport,
+    required int personCount,
+    required String region,
+    required String duration,
+    required int days,
+    required List<String> themes,
+  }) async {
     try {
-      print("🚀 [에뮬레이터] 서버로 데이터 전송: $tags, $days일");
-
       final response = await http.post(
-        url,
-        headers: {"Content-Type": "application/json"},
+        Uri.parse('$baseUrl/ai-predict'),
+        headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
-          "tags": tags,
-          "days": days,
+          'transport': transport,       // 이동 수단 (예: 대중교통/도보)
+          'personCount': personCount,   // 인원수 (예: 2)
+          'region': region,             // 지역 (예: 충남 전체)
+          'duration': duration,         // 텍스트 기간 (예: 1박 2일)
+          'days': days,                 // 숫자 일수 (예: 2)
+          'themes': themes,             // 테마 리스트 (예: ["바다", "힐링"])
         }),
       );
 
       if (response.statusCode == 200) {
-        // 한글 깨짐 방지를 위한 utf8 디코딩 처리
-        var decodedData = utf8.decode(response.bodyBytes);
-        print("✅ 서버 응답 성공: $decodedData");
-        return jsonDecode(decodedData);
+        // 한글 깨짐 방지를 위해 utf8 디코딩 후 json 파싱
+        return jsonDecode(utf8.decode(response.bodyBytes));
       } else {
-        print("🔥 서버 에러: ${response.statusCode}");
-        throw Exception("서버 통신 실패: ${response.statusCode}");
+        print('서버 에러 발생: 상태 코드 ${response.statusCode}');
+        return null;
       }
     } catch (e) {
-      print("❌ 연결 오류: $e");
-      throw Exception("서버 연결 실패. (Node.js 켜져 있는지 확인!)");
+      print('네트워크 에러 발생: $e');
+      return null;
     }
   }
 }
