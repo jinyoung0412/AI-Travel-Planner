@@ -4,7 +4,7 @@ class TravelResultScreen extends StatelessWidget {
   final String region;
   final List<String> themes;
   final String duration;
-  final Map<String, dynamic> aiData; // 서버에서 넘겨받은 AI 결과 데이터
+  final Map<String, dynamic> aiData;
 
   const TravelResultScreen({
     super.key,
@@ -16,54 +16,177 @@ class TravelResultScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // 서버에서 받은 데이터 안전하게 추출
+    // 서버 데이터 추출 (없을 경우 기본값)
     String reason = aiData['reason'] ?? '이유를 불러올 수 없습니다.';
     List<dynamic> course = aiData['recommended_course'] ?? [];
     String time = aiData['total_time'] ?? '시간 정보 없음';
 
     return Scaffold(
+      backgroundColor: Colors.grey.shade100, // 전체 배경색을 살짝 어둡게 주어 카드가 돋보이게 함
       appBar: AppBar(
-        title: const Text('AI 추천 코스 결과'),
-        backgroundColor: Colors.blue.shade100,
+        title: const Text('AI 맞춤 여행 코스', style: TextStyle(fontWeight: FontWeight.bold)),
+        backgroundColor: Colors.white,
+        foregroundColor: Colors.black,
+        elevation: 0, // 상단바 그림자 제거로 깔끔하게
+        centerTitle: true,
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
+      body: SingleChildScrollView(
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text(
-              '📍 선택하신 정보\n - 지역: $region\n - 기간: $duration\n - 테마: ${themes.join(", ")}',
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.black54),
-            ),
-            const Divider(height: 30, thickness: 2),
-
-            const Text('💡 AI 추천 이유', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            Text(reason, style: const TextStyle(fontSize: 16)),
-
-            const SizedBox(height: 24),
-
-            const Text('🗺️ 추천 여행 코스', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            // 배열로 온 코스를 보기 좋게 나열
-            ...course.map((place) => Padding(
-              padding: const EdgeInsets.symmetric(vertical: 4.0),
-              child: Row(
+            // 1. 가상의 지도 영역 (추후 카카오맵/구글맵 연동할 자리)
+            Container(
+              height: 200,
+              width: double.infinity,
+              color: Colors.blue.shade50,
+              child: const Column(
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Icon(Icons.check_circle, color: Colors.blue, size: 20),
-                  const SizedBox(width: 8),
-                  Text(place.toString(), style: const TextStyle(fontSize: 16)),
+                  Icon(Icons.map_outlined, size: 50, color: Colors.blue),
+                  SizedBox(height: 8),
+                  Text('지도 API 연동 대기중', style: TextStyle(color: Colors.blue, fontWeight: FontWeight.bold)),
                 ],
               ),
-            )),
+            ),
 
-            const SizedBox(height: 24),
+            Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // 2. 사용자가 선택한 기본 정보 요약 칩
+                  Wrap(
+                    spacing: 8.0,
+                    children: [
+                      Chip(
+                        label: Text(region),
+                        backgroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                      Chip(
+                        label: Text(duration),
+                        backgroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                      ...themes.map((theme) => Chip(
+                        label: Text(theme, style: const TextStyle(color: Colors.white)),
+                        backgroundColor: Colors.blue,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      )),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
 
-            const Text('⏱️ 예상 소요 시간', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            Text(time, style: const TextStyle(fontSize: 16)),
+                  // 3. AI 추천 이유 카드
+                  Card(
+                    color: Colors.white,
+                    elevation: 2,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              const Icon(Icons.auto_awesome, color: Colors.amber),
+                              const SizedBox(width: 8),
+                              const Text('AI의 추천 코멘트', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                            ],
+                          ),
+                          const Divider(),
+                          Text(reason, style: const TextStyle(fontSize: 15, height: 1.5, color: Colors.black87)),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+
+                  // 4. 추천 코스 타임라인 영역
+                  const Text('📍 이동 동선', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 16),
+
+                  Card(
+                    color: Colors.white,
+                    elevation: 2,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: Column(
+                        children: List.generate(course.length, (index) {
+                          bool isLast = index == course.length - 1;
+                          return _buildTimelineItem(course[index].toString(), isLast, index + 1);
+                        }),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+
+                  // 5. 총 예상 소요 시간 카드
+                  Card(
+                    color: Colors.white,
+                    elevation: 2,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    child: ListTile(
+                      leading: const Icon(Icons.timer, color: Colors.blue, size: 30),
+                      title: const Text('총 예상 소요 시간', style: TextStyle(fontWeight: FontWeight.bold)),
+                      trailing: Text(time, style: const TextStyle(fontSize: 16, color: Colors.blue, fontWeight: FontWeight.bold)),
+                    ),
+                  ),
+                  const SizedBox(height: 30),
+                ],
+              ),
+            ),
           ],
         ),
+      ),
+    );
+  }
+
+  // 타임라인 UI를 그려주는 내부 함수
+  Widget _buildTimelineItem(String placeName, bool isLast, int stepNumber) {
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // 왼쪽: 점과 선 그려주는 영역
+          Column(
+            children: [
+              Container(
+                width: 24,
+                height: 24,
+                decoration: BoxDecoration(
+                  color: Colors.blue,
+                  shape: BoxShape.circle,
+                ),
+                child: Center(
+                  child: Text(
+                    stepNumber.toString(),
+                    style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ),
+              if (!isLast)
+                Expanded(
+                  child: Container(
+                    width: 2,
+                    color: Colors.blue.shade200, // 다음 장소로 이어지는 선
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(width: 16),
+          // 오른쪽: 장소 이름 텍스트 영역
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 24.0), // 각 장소 간의 간격
+              child: Text(
+                placeName,
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, height: 1.2),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
