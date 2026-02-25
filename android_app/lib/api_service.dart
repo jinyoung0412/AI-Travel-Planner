@@ -3,7 +3,6 @@ import 'package:http/http.dart' as http;
 
 class ApiService {
   // 에뮬레이터에서 로컬 Node.js 서버에 접근하기 위한 IP (10.0.2.2)
-  // 실물 폰 연결 시에는 컴퓨터의 실제 IP(예: 192.168.x.x)를 입력해야 합니다.
   static const String baseUrl = 'http://10.0.2.2:8080';
 
   // 모든 여행 정보를 받아서 서버로 전송하는 함수

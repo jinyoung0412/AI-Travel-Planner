@@ -103,7 +103,7 @@ class TravelResultScreen extends StatelessWidget {
                   const SizedBox(height: 20),
 
                   // 4. 추천 코스 타임라인 영역
-                  const Text('📍 이동 동선', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                  const Text('이동 동선', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 16),
 
                   Card(

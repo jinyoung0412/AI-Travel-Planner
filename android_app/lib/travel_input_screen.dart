@@ -151,7 +151,6 @@ class _TravelInputScreenState extends State<TravelInputScreen> {
                   try {
                     int requestDays = _convertDurationToDays(duration);
 
-                    // 👉 수정된 부분: 수집한 모든 데이터를 함수에 넣어 보냅니다.
                     final response = await ApiService.getRecommendation(
                       transport: selectedTransport,
                       personCount: personCount,

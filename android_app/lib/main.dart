@@ -13,7 +13,7 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       title: '충남 여행 AI',
       theme: ThemeData(
-        // 앱의 메인 색상 (충남이니까 파란색 계열 추천!)
+        // 앱의 메인 색상
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
         useMaterial3: true,
       ),
