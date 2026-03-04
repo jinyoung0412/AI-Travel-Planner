@@ -40,5 +40,5 @@ app.post('/ai-predict', async (req, res) => {
 
 const PORT = 8080;
 app.listen(PORT, () => {
-    console.log(`[Node] 서버가 ${PORT} 포트에서 실행 중입니다.`);
+    console.log(`[Node] 서버가 ${PORT} 포트에서 실행 중입니다.`); //uhiuhu
 });
