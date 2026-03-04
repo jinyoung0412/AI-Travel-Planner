@@ -14,7 +14,7 @@ def ai_predict():
     try:
         # 1. Node.js가 보낸 JSON 데이터 받기
         data = request.get_json()
-        print(f"📦 [Flask] Node.js에서 받은 데이터: {data}")
+        print(f"[Flask] Node.js에서 받은 데이터: {data}")
         
         # 2. 데이터 추출 (기본값 설정)
         themes = data.get('themes', [])
@@ -56,13 +56,13 @@ def ai_predict():
             "total_time": f"약 {len(course_names) * 3}시간" # 장소당 임의로 3시간 배정
         }
         
-        print(f"✅ [Flask] AI 연산 완료 및 응답: {course_names}")
+        print(f"[Flask] AI 연산 완료 및 응답: {course_names}")
         
         # 7. JSON 형태로 변환하여 정상(200) 응답
         return jsonify(response_data), 200
         
     except Exception as e:
-        print(f"🔥 [Flask] 에러 발생: {e}")
+        print(f"[Flask] 에러 발생: {e}")
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
