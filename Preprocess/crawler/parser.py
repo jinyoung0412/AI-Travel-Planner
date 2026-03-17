@@ -1,13 +1,10 @@
-# Preprocess/crawler/parser.py
-
+import re
+import time
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-import re
-import time
 
 def extract_list_items(driver):
-    """리스트에서 광고/함정 카드를 제외하고 진짜 가게만 가져옵니다."""
     selectors = [
         "#_pcmap_list_scroll_container ul > li",
         "div.search_list_wrap ul > li"
@@ -24,41 +21,55 @@ def extract_list_items(driver):
     for item in raw_items:
         try:
             text = item.text
-            # [함정 카드 제거]
+            if not text: 
+                continue
+            
             if "내 업체 등록하기" in text: continue
             if "새로 오픈했어요" in text: continue
             if "광고" in text and "리뷰" not in text: continue
             
-            # [유효성 체크] 링크가 있어야 진짜 가게
-            try: item.find_element(By.CSS_SELECTOR, "a.place_bluelink, div.TaEbI")
-            except: continue
+            # 클래스 이름에 의존하지 않고, a 태그의 존재 여부만으로 유효성 검증
+            links = item.find_elements(By.TAG_NAME, "a")
+            if not links: 
+                continue
 
             valid_items.append(item)
-        except: continue
+        except: 
+            continue
 
     return valid_items
 
 def extract_name_element(item):
-    """이름과 클릭 타겟 추출"""
     click_target = None
     name = ""
     try:
-        try: click_target = item.find_element(By.CSS_SELECTOR, "a.place_bluelink")
-        except:
-            try: click_target = item.find_element(By.CSS_SELECTOR, "div.TaEbI > a")
-            except: click_target = item
-
-        try: name = item.find_element(By.CSS_SELECTOR, "span.xBZDS").text.strip()
-        except:
-            try: name = item.find_element(By.CSS_SELECTOR, "span.TYaxT").text.strip()
+        links = item.find_elements(By.TAG_NAME, "a")
+        if links:
+            click_target = links[0]
+        else:
+            click_target = item
+        
+        # 네이버의 과거 및 최신 클래스를 모두 순회하며 확인
+        name_selectors = ["span.YwYLL", "span.TYaxT", "span.xBZDS", "span.O8qbU", "span.place_bluelink", "div.TaEbI > a"]
+        for sel in name_selectors:
+            try: 
+                name_el = item.find_element(By.CSS_SELECTOR, sel)
+                if name_el.text:
+                    name = name_el.text.strip()
+                    break
             except: 
-                if click_target: name = click_target.text.split("\n")[0]
+                pass
+        
+        if not name and click_target:
+            lines = click_target.text.split("\n")
+            if lines: 
+                name = lines[0].strip()
+
         return click_target, name
     except:
         return None, ""
 
 def parse_detail_page(driver):
-    """상세 정보 수집 (스마트 플레이스 차단 + 영업시간 정제)"""
     driver.switch_to.default_content()
     try:
         WebDriverWait(driver, 2).until(
@@ -69,26 +80,36 @@ def parse_detail_page(driver):
 
     time.sleep(0.5)
 
-    # (1) 카테고리 & 주소
-    try: cat = driver.find_element(By.CSS_SELECTOR, "span.lnJFt").text.strip()
-    except: cat = ""
-    try: addr = driver.find_element(By.CSS_SELECTOR, ".LDgIH").text.strip()
-    except: addr = ""
+    cat = ""
+    try:
+        cat_els = driver.find_elements(By.CSS_SELECTOR, "span.lnJFt, span.DJJvD")
+        if cat_els: 
+            cat = cat_els[0].text.strip()
+    except: 
+        pass
 
-    # (2) 리뷰 수
+    addr = ""
+    try:
+        addr_els = driver.find_elements(By.CSS_SELECTOR, "span.LDgIH, div.vV_z_")
+        if addr_els: 
+            addr = addr_els[0].text.strip()
+    except: 
+        pass
+
     v, b = 0, 0
     try:
         body = driver.find_element(By.TAG_NAME, "body").text
         v_match = re.search(r"방문자 리뷰\s*([\d,]+)", body)
-        if v_match: v = int(v_match.group(1).replace(",", ""))
+        if v_match: 
+            v = int(v_match.group(1).replace(",", ""))
         b_match = re.search(r"블로그 리뷰\s*([\d,]+)", body)
-        if b_match: b = int(b_match.group(1).replace(",", ""))
-    except: pass
+        if b_match: 
+            b = int(b_match.group(1).replace(",", ""))
+    except: 
+        pass
 
-    # (3) 영업 시간
     op_time = ""
     try:
-        # 버튼 클릭 (수정 제안 버튼 차단)
         candidates = driver.find_elements(By.CSS_SELECTOR, "svg.DNzQ2, a[aria-expanded='false'], span._UCia")
         for el in candidates:
             try:
@@ -97,16 +118,18 @@ def parse_detail_page(driver):
                     target_btn = el.find_element(By.XPATH, "./..")
                 
                 href = target_btn.get_attribute("href")
-                if href and ("suggestion" in href or "smartplace" in href): continue
-                if "수정" in target_btn.text or "제안" in target_btn.text: continue
+                if href and ("suggestion" in href or "smartplace" in href): 
+                    continue
+                if "수정" in target_btn.text or "제안" in target_btn.text: 
+                    continue
 
                 driver.execute_script("arguments[0].click();", target_btn)
                 time.sleep(0.1)
-            except: pass
+            except: 
+                pass
         
         time.sleep(0.5)
 
-        # 텍스트 수집 (요일 우선)
         day_elements = driver.find_elements(By.CSS_SELECTOR, "span.i8cJw")
         time_list = []
         
@@ -115,7 +138,8 @@ def parse_detail_page(driver):
                 try:
                     row_text = day_el.find_element(By.XPATH, "./../..").text.strip()
                     time_list.append(row_text.replace("\n", " "))
-                except: pass
+                except: 
+                    pass
         else:
             backup_els = driver.find_elements(By.CSS_SELECTOR, "div.A_cdD, span.A_cdD")
             for el in backup_els:
@@ -123,7 +147,6 @@ def parse_detail_page(driver):
                 if "원" not in t and any(c.isdigit() for c in t) and ("매일" in t or "영업" in t):
                     time_list.append(t)
 
-        # [불필요한 정보 필터링]
         bad_keywords = ["방송", "투데이", "고향", "생생", "2TV", "회,", "출연", "접기", "방영", "맛집", "수요미식회"]
         clean_times = []
         for t in time_list:
