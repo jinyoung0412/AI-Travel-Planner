@@ -13,8 +13,8 @@ def integrate_data():
     src_dir = os.path.dirname(preprocessing_dir)
     project_root = os.path.dirname(src_dir)
 
-    input_base_path = os.path.join(project_root, "data", "raw", "output", "chungnam_data")
-    output_dir = os.path.join(project_root, "data", "processed")
+    input_base_path = os.path.join(project_root, "Preprocess","data", "chungnam_data")
+    output_dir = os.path.join(project_root, "Preprocess","data", "processed")
     os.makedirs(output_dir, exist_ok=True)
 
     print(f"📂 Input Path: {input_base_path}")
