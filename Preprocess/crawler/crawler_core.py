@@ -1,17 +1,17 @@
-# src/crawler/crawler_core.py
+# Preprocess/crawler/crawler_core.py
 
 import time
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 
-from src.crawler.driver import create_driver
-from src.crawler.iframe_utils import (
+from Preprocess.crawler.driver import create_driver
+from Preprocess.crawler.iframe_utils import (
     wait_for_list_panel, open_list_panel_force, lock_to_list_panel
 )
-from src.crawler.pagination import go_next_page
-from src.crawler.parser import extract_list_items, extract_name_element, parse_detail_page
-from src.crawler.saver import get_csv_path, load_existing_names, save_item, touch_init_file
-from src.crawler.throttler import throttle_click_delay, throttle_page_delay
+from Preprocess.crawler.pagination import go_next_page
+from Preprocess.crawler.parser import extract_list_items, extract_name_element, parse_detail_page
+from Preprocess.crawler.saver import get_csv_path, load_existing_names, save_item, touch_init_file
+from Preprocess.crawler.throttler import throttle_click_delay, throttle_page_delay
 
 class ChungnamCrawler:
     def __init__(self):
@@ -80,7 +80,7 @@ class ChungnamCrawler:
         initial_items = extract_list_items(self.driver)
         total_count = len(initial_items)
         
-        print(f"   📋 목록 발견: {total_count}개 -> 수집 시작")
+        print(f"목록 발견: {total_count}개 -> 수집 시작")
         processed = 0
         
         for idx in range(total_count):
@@ -127,7 +127,7 @@ class ChungnamCrawler:
                                 self.driver.execute_script("arguments[0].click();", text_el)
                                 time.sleep(1.5)
                                 if self.check_and_close_popup():
-                                    # print(f"      🛡️ 재시도 실패: {name}")
+                                    # print(f"      재시도 실패: {name}")
                                     continue
                             else: continue
                     else: continue 
@@ -149,7 +149,7 @@ class ChungnamCrawler:
                 existing.add(name)
                 
                 t_stat = 'O' if op_time != '시간없음' else 'X'
-                print(f"      💾 저장: {name} (V:{v_rev}, B:{b_rev}, T:{t_stat})")
+                print(f"저장: {name} (V:{v_rev}, B:{b_rev}, T:{t_stat})")
                 processed += 1
                 
             except Exception:
