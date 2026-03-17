@@ -1,20 +1,28 @@
-# Preprocess/crawler/saver.py
-
 import csv
 import os
 
 def get_csv_path(region, category):
-    """저장할 파일 경로 생성 (data/충남_천안_카페.csv)"""
-    folder = "data"
+    folder = r"C:\AI-Travel-Planner\Preprocess\data\chungnam_data"
     if not os.path.exists(folder):
         os.makedirs(folder)
-    # 공백 등을 _로 치환
     clean_reg = region.replace(" ", "_")
     clean_cat = category.replace(" ", "_")
     return f"{folder}/충남_{clean_reg}_{clean_cat}.csv"
 
+def get_done_path(region, category):
+    folder = r"C:\AI-Travel-Planner\Preprocess\data\chungnam_data"
+    clean_reg = region.replace(" ", "_")
+    clean_cat = category.replace(" ", "_")
+    return f"{folder}/충남_{clean_reg}_{clean_cat}.done"
+
+def is_task_completed(region, category):
+    return os.path.exists(get_done_path(region, category))
+
+def mark_task_completed(region, category):
+    with open(get_done_path(region, category), "w", encoding="utf-8") as f:
+        f.write("DONE")
+
 def touch_init_file(filepath):
-    """파일이 없으면 헤더(제목 줄) 생성"""
     if not os.path.exists(filepath):
         with open(filepath, "w", encoding="utf-8-sig", newline="") as f:
             writer = csv.writer(f)
@@ -24,7 +32,6 @@ def touch_init_file(filepath):
             ])
 
 def load_existing_names(filepath):
-    """이미 수집한 가게 이름을 불러와서 중복 방지"""
     existing = set()
     if os.path.exists(filepath):
         with open(filepath, "r", encoding="utf-8-sig") as f:
@@ -35,7 +42,6 @@ def load_existing_names(filepath):
     return existing
 
 def save_item(filepath, data):
-    """데이터 한 줄 추가"""
     with open(filepath, "a", encoding="utf-8-sig", newline="") as f:
         writer = csv.writer(f)
         writer.writerow([
