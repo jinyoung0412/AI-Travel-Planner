@@ -1,4 +1,4 @@
-# src/crawler/categories.py
+# Preprocess/crawler/categories.py
 CATEGORIES = [
     # 식음료
     "맛집", "카페", "베이커리", "한식", "양식", "일식", "중식", "고기집",

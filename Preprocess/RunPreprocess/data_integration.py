@@ -5,7 +5,7 @@ import sys
 
 def integrate_data():
     print("=" * 50)
-    print("🔄 데이터 통합(Integration) 시작")
+    print("데이터 통합(Integration) 시작")
     print("=" * 50)
 
     current_file_path = os.path.abspath(__file__)

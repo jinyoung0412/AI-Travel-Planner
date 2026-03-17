@@ -32,15 +32,15 @@ def main():
     pipeline_steps = [
         {
             "name": "1. 데이터 크롤링 (Data Crawling)",
-            "path": os.path.join("src", "crawler", "run_crawling.py")
+            "path": os.path.join("Preprocess", "crawler", "run_crawling.py")
         },
         {
             "name": "2. 데이터 통합 (Data Integration)",
-            "path": os.path.join("src", "preprocessing", "data_integration.py")
+            "path": os.path.join("Preprocess", "preprocessing", "data_integration.py")
         },
         {
             "name": "3. 지오코딩 (Geocoding - 좌표 변환)",
-            "path": os.path.join("src", "preprocessing", "geocoding.py")
+            "path": os.path.join("Preprocess", "preprocessing", "geocoding.py")
         }
     ]
 
