@@ -77,7 +77,7 @@ if __name__ == "__main__":
     
     # 32GB 램이라도 학교 컴퓨터 사양을 고려해 3~4코어 유지를 권장합니다.
     # 학교에서는 processes=2 정도로 낮추는 것이 안전합니다.
-    pool = multiprocessing.Pool(processes=4) 
+    pool = multiprocessing.Pool(processes=2)
     
     tasks = [(region, CATEGORIES, q) for region in REGIONS]
 
