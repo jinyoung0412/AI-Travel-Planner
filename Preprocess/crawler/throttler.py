@@ -9,4 +9,4 @@ def throttle_scroll_delay():
     time.sleep(0.5)
 
 def throttle_page_delay():
-    time.sleep(2.0)
+    time.sleep(1.8)

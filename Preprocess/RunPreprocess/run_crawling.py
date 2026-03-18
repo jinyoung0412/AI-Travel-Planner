@@ -68,16 +68,15 @@ if __name__ == "__main__":
 
     total_subtasks = len(REGIONS) * len(CATEGORIES)
     
-    print("\n크롤링 작업을 시작합니다.")
+    core=4 #크롤링을 돌릴 코어 수 (본인 램 용량이나 CPU 사양에 따라 코어 수 조절.)
+    print(f"\n크롤링 작업을 시작합니다.(코어 갯수:{core})")
     print(f"총 {total_subtasks}개의 세부 작업을 진행합니다.")
     print("-" * 60)
 
     manager = multiprocessing.Manager()
     q = manager.Queue()
     
-    # 32GB 램이라도 학교 컴퓨터 사양을 고려해 3~4코어 유지를 권장합니다.
-    # 학교에서는 processes=2 정도로 낮추는 것이 안전합니다.
-    pool = multiprocessing.Pool(processes=2)
+    pool = multiprocessing.Pool(processes=core)
     
     tasks = [(region, CATEGORIES, q) for region in REGIONS]
 
