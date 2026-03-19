@@ -29,7 +29,7 @@ def ai_predict():
             if len(region_filtered) >= 3:
                 df = region_filtered
             else:
-                print(f"[Flask] '{region}' 지역 데이터가 부족하여 전체 지역으로 탐색합니다.")
+                print(f"[Flask] '{region}' 지역 데이터가 부족하여 전체 지역으로 탐색합니다..")
         
         if themes:
             theme_filtered = df[df['search_category'].isin(themes)]
