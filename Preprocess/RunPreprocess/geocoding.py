@@ -25,7 +25,7 @@ def main():
         print("❌ KAKAO_API_KEY가 .env에 없습니다.")
         return
 
-    data_dir = os.path.join(project_root, "data", "processed")
+    data_dir = os.path.join(project_root, "Preprocess","data", "processed")
     input_file = os.path.join(data_dir, "chungnam_places_total.csv")
     output_file = os.path.join(data_dir, "chungnam_places_with_coords_safe.csv")
 
@@ -58,7 +58,7 @@ def main():
 
     count = 0
     for idx in tqdm(targets):
-        addr = df.loc[idx, "address"]
+        addr = df.loc[idx, "주소"]
         if pd.isna(addr) or addr.strip() == "":
             continue
 

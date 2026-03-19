@@ -20,10 +20,10 @@ class ChungnamCrawler:
     def __init__(self):
         self.driver = None
         self.base_url = "https://map.naver.com/p?c=15.00,0,0,0,dh"
-        self.exclude_keywords = [ #수집 제외대상
+        self.exclude_keywords = [
             "롯데리아", "맥도날드", "버거킹", "맘스터치", "KFC", "노브랜드버거",
             "메가커피", "메가MGC커피", "빽다방", "스타벅스", "이디야", "투썸플레이스",
-            "컴포즈커피", "할리스"
+            "컴포즈커피", "할리스",
             "파리바게뜨", "뚜레쥬르", "배스킨라빈스", "던킨",
             "교촌치킨", "BHC", "bhc", "BBQ", "bbq", "굽네치킨",
             "서브웨이", "써브웨이", "김밥천국", "이삭토스트",
@@ -53,7 +53,7 @@ class ChungnamCrawler:
         if self.driver:
             try:
                 self.driver.quit()
-            except:
+            except Exception:
                 pass
             self.driver = None
 
@@ -73,7 +73,7 @@ class ChungnamCrawler:
                 box.send_keys(Keys.ENTER)
                 time.sleep(2)
                 return True
-            except:
+            except Exception:
                 time.sleep(1)
         return False
 
@@ -96,7 +96,7 @@ class ChungnamCrawler:
 
         try:
             scroll_area = self.driver.find_element(By.ID, "_pcmap_list_scroll_container")
-        except: 
+        except Exception: 
             return False
         
         for _ in range(5): 
@@ -111,7 +111,7 @@ class ChungnamCrawler:
                 self.driver.close()
                 self.driver.switch_to.window(self.driver.window_handles[0])
                 return True
-        except: 
+        except Exception: 
             pass
         return False
 
@@ -139,17 +139,25 @@ class ChungnamCrawler:
         if frames:
             self.driver.switch_to.frame(frames[0])
         time.sleep(2.0)
+        
         initial_items = extract_list_items(self.driver)
         total_count = len(initial_items)
         if total_count == 0:
             return 0
+            
+        need_refresh = True
+        current_items = []
+        
         for idx in range(total_count):
             try:
-                self.driver.switch_to.default_content()
-                frames = self.driver.find_elements(By.ID, "searchIframe")
-                if not frames: break
-                self.driver.switch_to.frame(frames[0])
-                current_items = extract_list_items(self.driver)
+                if need_refresh:
+                    self.driver.switch_to.default_content()
+                    frames = self.driver.find_elements(By.ID, "searchIframe")
+                    if not frames: break
+                    self.driver.switch_to.frame(frames[0])
+                    current_items = extract_list_items(self.driver)
+                    need_refresh = False
+
                 if idx >= len(current_items): break
                 item = current_items[idx]
                 el, name = extract_name_element(item)
@@ -157,8 +165,7 @@ class ChungnamCrawler:
                 if not name or name in existing: 
                     continue
                 
-                item_text = item.text
-                is_excluded = any(kw in item_text for kw in self.exclude_keywords)
+                is_excluded = any(kw in name for kw in self.exclude_keywords)
                 if is_excluded:
                     continue
 
@@ -166,6 +173,8 @@ class ChungnamCrawler:
                 time.sleep(0.3)
                 self.driver.execute_script("arguments[0].click();", el)
                 time.sleep(1.0) 
+                
+                need_refresh = True
                 
                 if self.check_and_close_popup():
                     self.driver.switch_to.default_content()
@@ -177,9 +186,9 @@ class ChungnamCrawler:
                             retry_item = retry_items[idx]
                             text_el = None
                             try: text_el = retry_item.find_element(By.CSS_SELECTOR, "span.xBZDS")
-                            except:
+                            except Exception:
                                 try: text_el = retry_item.find_element(By.CSS_SELECTOR, "span.TYaxT")
-                                except: pass
+                                except Exception: pass
                             if text_el:
                                 self.driver.execute_script("arguments[0].click();", text_el)
                                 time.sleep(1.5)
@@ -195,15 +204,32 @@ class ChungnamCrawler:
                     "blog_review": b_rev, "operating_time": op_time
                 })
                 existing.add(name)
-            except:
+                
+            except KeyboardInterrupt:
+                raise
+            except Exception:
+                need_refresh = True
                 continue
+            finally:
+                try:
+                    self.driver.switch_to.default_content()
+                    frames = self.driver.find_elements(By.ID, "searchIframe")
+                    if frames:
+                        self.driver.switch_to.frame(frames[0])
+                except Exception:
+                    pass
+
         return total_count
 
     def crawl_region_all_categories(self, region, categories, q=None):
         existing_names = self.load_existing_names_for_region(region)
 
-        self.start_driver()
-        self.open_naver_map()
+        try:
+            self.start_driver()
+            self.open_naver_map()
+        except Exception:
+            pass
+
         processed_cats = 0
 
         for category in categories:
@@ -212,9 +238,12 @@ class ChungnamCrawler:
                     continue
 
                 if processed_cats > 0 and processed_cats % 10 == 0:
-                    self.stop_driver()
-                    self.start_driver()
-                    self.open_naver_map()
+                    try:
+                        self.stop_driver()
+                        self.start_driver()
+                        self.open_naver_map()
+                    except Exception:
+                        pass
 
                 keyword = f"{region} {category}"
                 csv_path = get_csv_path(region, category)
@@ -236,9 +265,12 @@ class ChungnamCrawler:
                 mark_task_completed(region, category)
                 processed_cats += 1
 
+            except KeyboardInterrupt:
+                raise
             except Exception:
                 pass
-            finally:
-                if q: q.put(1)
         
+        if q: 
+            q.put(1)
+            
         self.stop_driver()
