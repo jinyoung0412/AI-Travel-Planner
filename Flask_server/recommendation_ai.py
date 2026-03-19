@@ -14,15 +14,23 @@ def calculate_eff_dist(d_real, transport):
     return d_real * 1.0
 
 def get_best_route(df, transport, region="충남 전체"):
-    print(f"\n--- [{region}] 경로 추천 연산 시작 ---")
+    print(f"\n--- [{region}] 경로 추천 연산 시작 ---") #지역별로 경로 추천함
     
     df['S'] = df.apply(lambda row: calculate_score(row['방문자수'], row['블로그수']), axis=1)
 
     if 'Cluster' in df.columns and len(df['Cluster'].unique()) > 1:
-        cluster_scores = df.groupby('Cluster')['S'].mean()
-        best_cluster = cluster_scores.idxmax()
-        best_df = df[df['Cluster'] == best_cluster].copy()
-        print(f"[추천 모듈] 선택된 최적 군집: {best_cluster}번 (장소 {len(best_df)}개)")
+        cluster_counts = df['Cluster'].value_counts()
+        valid_clusters = cluster_counts[cluster_counts >= 3].index
+        
+        if len(valid_clusters) > 0:
+            valid_df = df[df['Cluster'].isin(valid_clusters)]
+            cluster_scores = valid_df.groupby('Cluster')['S'].mean()
+            best_cluster = cluster_scores.idxmax()
+            best_df = df[df['Cluster'] == best_cluster].copy()
+            print(f"[추천 모듈] 선택된 최적 군집: {best_cluster}번 (장소 {len(best_df)}개)")
+        else:
+            best_df = df.copy()
+            print("[추천 모듈] 모든 군집의 장소가 3개 미만이므로 전체 데이터를 사용합니다.")
     else:
         best_df = df.copy()
 
@@ -58,4 +66,4 @@ if __name__ == "__main__":
     if os.path.exists('chungnam_places_filtered.csv'):
         sample_df = pd.read_csv('chungnam_places_filtered.csv')
         clustered_df = perform_clustering(sample_df, transport='대중교통/도보')
-        get_best_route(clustered_df, transport='대중교통/도보')
+        get_best_route(clustered_df, transport='대중교통/도보') 
