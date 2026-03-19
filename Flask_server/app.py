@@ -21,11 +21,11 @@ def ai_predict():
         region = data.get('region', '충남 전체')
         transport = data.get('transport', '대중교통/도보') # '승용차' 또는 '대중교통/도보'
         
-        # 3. 더미 데이터 로드
-        if not os.path.exists('dummy_data.csv'):
-            return jsonify({"error": "dummy_data.csv 파일이 서버에 없습니다."}), 500
+        # 3. 데이터 로드
+        if not os.path.exists('C:\AI-Travel-Planner\Preprocess\data\processed\chungnam_places_filtered.csv'):
+            return jsonify({"error": "chungnam_places_filtered.csv 파일이 서버에 없습니다."}), 500
             
-        df = pd.read_csv('dummy_data.csv')
+        df = pd.read_csv('C:\AI-Travel-Planner\Preprocess\data\processed\chungnam_places_filtered.csv')
         
         # 4. 사용자 맞춤형 테마 필터링
         if themes:
@@ -33,7 +33,7 @@ def ai_predict():
             
         # 데이터 부족 시 예외 처리 (테마 필터링 후 장소가 너무 적으면 원본 복구)
         if df.empty or len(df) < 3:
-            df = pd.read_csv('dummy_data.csv')
+            df = pd.read_csv('C:\AI-Travel-Planner\Preprocess\data\processed\chungnam_places_filtered.csv')
             reason_text = f"선택하신 조건에 맞는 장소가 부족하여 전체 데이터를 기반으로 분석한 '{region}' 맞춤 코스입니다."
         else:
             themes_str = ', '.join(themes)
