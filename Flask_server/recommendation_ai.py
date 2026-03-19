@@ -13,18 +13,31 @@ def calculate_eff_dist(d_real, transport):
         return d_real * 0.5
     return d_real * 1.0
 
-def get_best_route(df, transport):
+def get_best_route(df, transport, region="충남 전체"):
+    print(f"\n--- [{region}] 경로 추천 연산 시작 ---")
+    
     df['S'] = df.apply(lambda row: calculate_score(row['방문자수'], row['블로그수']), axis=1)
 
-    best_df = df
+    if 'Cluster' in df.columns and len(df['Cluster'].unique()) > 1:
+        cluster_scores = df.groupby('Cluster')['S'].mean()
+        best_cluster = cluster_scores.idxmax()
+        best_df = df[df['Cluster'] == best_cluster].copy()
+        print(f"[추천 모듈] 선택된 최적 군집: {best_cluster}번 (장소 {len(best_df)}개)")
+    else:
+        best_df = df.copy()
 
-    start_point = (36.8151, 127.1139)
+    start_point = (best_df['latitude'].mean(), best_df['longitude'].mean())
+    print(f"[추천 모듈] 탐색 시작 기준점 (동적 계산): {start_point}")
 
     best_df['Dist'] = best_df.apply(lambda row: calculate_eff_dist(geodesic(start_point, (row['latitude'], row['longitude'])).kilometers, transport), axis=1)
     
     best_df['R'] = best_df['S'] / (best_df['Dist'] + 1)
     
     top_places = best_df.nlargest(3, 'R')
+    
+    print("\n[추천 모듈] 상위 3개 장소 선정 결과 (순위 로그):")
+    for idx, row in top_places.iterrows():
+        print(f"- {row['가게명']} | 방문자:{row['방문자수']}, 블로그:{row['블로그수']} | 기본점수:{row['S']:.1f} | 거리:{row['Dist']:.1f}km | 최종점수:{row['R']:.1f}")
     
     final_route = []
     current_loc = start_point
@@ -42,20 +55,7 @@ if __name__ == "__main__":
     import os
     from clustering_ai import perform_clustering
     
-    print("="*50)
-    print("추천 로직 단독 테스트")
-    print("="*50)
-    
     if os.path.exists('chungnam_places_filtered.csv'):
         sample_df = pd.read_csv('chungnam_places_filtered.csv')
-        clustered_df = perform_clustering(sample_df, num_clusters=2)
-        
-        print("\n[대중교통/도보] 최종 추천 동선:")
-        route_public = get_best_route(clustered_df, transport='대중교통/도보')
-        for i, place in enumerate(route_public):
-            print(f"{i+1}번 방문지: {place['가게명']} (방문자: {place['방문자수']}, 블로그: {place['블로그수']})")
-            
-        print("\n[승용차] 최종 추천 동선:")
-        route_car = get_best_route(clustered_df, transport='승용차')
-        for i, place in enumerate(route_car):
-            print(f"{i+1}번 방문지: {place['가게명']} (방문자: {place['방문자수']}, 블로그: {place['블로그수']})")
+        clustered_df = perform_clustering(sample_df, transport='대중교통/도보')
+        get_best_route(clustered_df, transport='대중교통/도보')
