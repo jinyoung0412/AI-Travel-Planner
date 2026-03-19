@@ -42,12 +42,10 @@
 
 ### Node.js 서버 실행
 cd NodeJS_server
-npm install
-node index.js
+node server.js
 
 ### Flask 서버 실행
 cd Flask_server
-pip install -r requirements.txt
 python app.py
 
 ### Flutter 앱 실행
