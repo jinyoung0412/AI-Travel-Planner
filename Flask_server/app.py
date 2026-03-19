@@ -11,7 +11,7 @@ app = Flask(__name__)
 def ai_predict():
     try:
         data = request.get_json()
-        print(f"[Flask] Node.js에서 받은 데이터: {data}")
+        print(f"\n[Flask] Node.js에서 받은 데이터: {data}")
         
         themes = data.get('themes', [])
         region = data.get('region', '충남 전체')
@@ -24,19 +24,30 @@ def ai_predict():
             
         df = pd.read_csv(file_path)
         
+        if region != '충남 전체':
+            region_filtered = df[df['주소'].str.contains(region, na=False)]
+            if len(region_filtered) >= 3:
+                df = region_filtered
+            else:
+                print(f"[Flask] '{region}' 지역 데이터가 부족하여 전체 지역으로 탐색합니다.")
+        
         if themes:
-            df = df[df['search_category'].isin(themes)]
+            theme_filtered = df[df['search_category'].isin(themes)]
+            if len(theme_filtered) >= 3:
+                df = theme_filtered
+            else:
+                print("[Flask] 테마 데이터가 부족하여 필터링을 무시합니다.")
             
         if df.empty or len(df) < 3:
             df = pd.read_csv(file_path)
-            reason_text = f"선택하신 조건에 맞는 장소가 부족하여 전체 데이터를 기반으로 분석한 '{region}' 맞춤 코스입니다."
+            reason_text = f"조건에 맞는 장소가 부족하여 전체 데이터를 기반으로 분석한 '{region}' 맞춤 코스입니다."
         else:
             themes_str = ', '.join(themes)
             reason_text = f"선택하신 '{themes_str}' 테마와 '{transport}' 접근성을 고려한 '{region}' AI 최적화 코스입니다."
 
-        clustered_df = perform_clustering(df, num_clusters=2)
+        clustered_df = perform_clustering(df, transport=transport)
         
-        final_route = get_best_route(clustered_df, transport=transport)
+        final_route = get_best_route(clustered_df, transport=transport, region=region)
         
         course_names = [place['가게명'] for place in final_route]
         

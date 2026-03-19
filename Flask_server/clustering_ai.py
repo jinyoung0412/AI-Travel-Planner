@@ -4,14 +4,21 @@ import warnings
 
 warnings.filterwarnings("ignore", category=UserWarning)
 
-def perform_clustering(df, num_clusters=2):
-    print(f"[군집화 모듈] 데이터 {len(df)}개 대상, {num_clusters}개 군집 생성 시작")
+def perform_clustering(df, transport='대중교통/도보'):
+    total_places = len(df)
     
-    if len(df) < num_clusters:
-        print(f"[군집화 모듈] 데이터 수가 군집 수({num_clusters})보다 적어 군집 수를 {len(df)}로 조정합니다.")
-        num_clusters = len(df)
+    if transport == '대중교통/도보':
+        num_clusters = max(2, total_places // 15)
+    else:
+        num_clusters = max(2, total_places // 30)
+
+    print(f"[군집화 모듈] 데이터 {total_places}개 대상, 이동수단 '{transport}' 고려하여 {num_clusters}개 군집 생성 시작")
+    
+    if total_places < num_clusters:
+        num_clusters = total_places
         
-    if num_clusters == 0:
+    if num_clusters <= 1:
+        print("[군집화 모듈] 데이터가 부족하여 군집화를 생략합니다.")
         return df
             
     coords = df[['latitude', 'longitude']].values
@@ -21,22 +28,13 @@ def perform_clustering(df, num_clusters=2):
     result_df = df.copy() 
     result_df['Cluster'] = kmeans.fit_predict(coords)
     
-    print("[군집화 모듈] 군집화 연산 완료")
+    print(f"[군집화 모듈] 군집화 연산 완료 (생성된 군집 수: {num_clusters}개)")
     
     return result_df
 
 if __name__ == "__main__":
     import os
     
-    print("="*50)
-    print("군집화 로직 단독 테스트 환경")
-    print("="*50)
-    
     if os.path.exists('chungnam_places_filtered.csv'):
         sample_df = pd.read_csv('chungnam_places_filtered.csv')
-        print(f"chungnam_places_filtered.csv 로드 완료 (총 {len(sample_df)}개 장소)")
-        
-        clustered_df = perform_clustering(sample_df, num_clusters=3)
-        print(f"\n군집화 결과 샘플:\n{clustered_df[['가게명', 'latitude', 'longitude', 'Cluster']].head(10)}")
-    else:
-        print("chungnam_places_filtered.csv 파일이 없습니다. 경로를 확인해주세요.")
+        clustered_df = perform_clustering(sample_df, transport='대중교통/도보')
