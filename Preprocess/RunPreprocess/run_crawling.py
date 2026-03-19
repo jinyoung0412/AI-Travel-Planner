@@ -68,7 +68,7 @@ if __name__ == "__main__":
 
     total_subtasks = len(REGIONS) * len(CATEGORIES)
     
-    core=4 #크롤링을 돌릴 코어 수 (본인 램 용량이나 CPU 사양에 따라 코어 수 조절.)
+    core=5 #크롤링을 돌릴 코어 수 (본인 램 용량이나 CPU 사양에 따라 코어 수 조절.)
     print(f"\n크롤링 작업을 시작합니다.(코어 갯수:{core})")
     print(f"총 {total_subtasks}개의 세부 작업을 진행합니다.")
     print("-" * 60)
@@ -76,7 +76,7 @@ if __name__ == "__main__":
     manager = multiprocessing.Manager()
     q = manager.Queue()
     
-    pool = multiprocessing.Pool(processes=core)
+    pool = multiprocessing.Pool(processes=core, maxtasksperchild=1)
     
     tasks = [(region, CATEGORIES, q) for region in REGIONS]
 
