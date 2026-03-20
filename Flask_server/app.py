@@ -11,53 +11,68 @@ app = Flask(__name__)
 def ai_predict():
     try:
         data = request.get_json()
-        print(f"\n[Flask] Node.js에서 받은 데이터: {data}")
+        print(f"[Flask] 수신 데이터: {data}")
         
         themes = data.get('themes', [])
-        region = data.get('region', '충남 전체')
         transport = data.get('transport', '대중교통/도보')
+        duration = data.get('duration', '당일치기')
         
         file_path = r'C:\AI-Travel-Planner\Preprocess\data\processed\chungnam_places_filtered.csv'
         
         if not os.path.exists(file_path):
-            return jsonify({"error": "chungnam_places_filtered.csv 파일이 서버에 없습니다."}), 500
+            return jsonify({"error": "데이터 파일이 서버에 없습니다."}), 500
             
         df = pd.read_csv(file_path)
+        df = df[df['주소'].str.contains('천안|아산', na=False)]
         
-        if region != '충남 전체':
-            region_filtered = df[df['주소'].str.contains(region, na=False)]
-            if len(region_filtered) >= 3:
-                df = region_filtered
-            else:
-                print(f"[Flask] '{region}' 지역 데이터가 부족하여 전체 지역으로 탐색합니다..")
+        region_target = '천안/아산'
+        if duration == '당일치기' and transport == '대중교통/도보':
+            asan_df = df[df['주소'].str.contains('아산', na=False)]
+            if len(asan_df) >= 3:
+                df = asan_df
+                region_target = '아산'
         
         if themes:
             theme_filtered = df[df['search_category'].isin(themes)]
             if len(theme_filtered) >= 3:
                 df = theme_filtered
-            else:
-                print("[Flask] 테마 데이터가 부족하여 필터링을 무시합니다.")
             
         if df.empty or len(df) < 3:
             df = pd.read_csv(file_path)
-            reason_text = f"조건에 맞는 장소가 부족하여 전체 데이터를 기반으로 분석한 '{region}' 맞춤 코스입니다."
+            df = df[df['주소'].str.contains('천안|아산', na=False)]
+            reason_text = "조건에 맞는 장소가 부족하여 천안/아산 전체 데이터를 기반으로 한 맞춤 코스입니다."
         else:
             themes_str = ', '.join(themes)
-            reason_text = f"선택하신 '{themes_str}' 테마와 '{transport}' 접근성을 고려한 '{region}' AI 최적화 코스입니다."
+            reason_text = f"선택하신 '{themes_str}' 테마와 '{transport}' 접근성을 고려한 최적화 코스입니다."
 
         clustered_df = perform_clustering(df, transport=transport)
         
-        final_route = get_best_route(clustered_df, transport=transport, region=region)
+        final_route, start_point, start_name = get_best_route(clustered_df, transport=transport, region=region_target)
         
-        course_names = [place['가게명'] for place in final_route]
+        course_data = []
+        for place in final_route:
+            course_data.append({
+                "name": place['가게명'],
+                "lat": place['latitude'],
+                "lng": place['longitude'],
+                "address": place['주소'],
+                "category": place['search_category']
+            })
+            
+        start_hub_data = None
+        if start_name:
+            start_hub_data = {
+                "name": start_name,
+                "lat": start_point[0],
+                "lng": start_point[1]
+            }
         
         response_data = {
             "reason": reason_text,
-            "recommended_course": course_names,
-            "total_time": f"약 {len(course_names) * 3}시간"
+            "start_hub": start_hub_data,
+            "recommended_course": course_data,
+            "total_time": f"약 {len(course_data) * 3}시간"
         }
-        
-        print(f"[Flask] AI 연산 완료 및 응답: {course_names}")
         
         return jsonify(response_data), 200
         
