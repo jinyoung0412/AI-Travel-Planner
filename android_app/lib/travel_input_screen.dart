@@ -19,13 +19,8 @@ class _TravelInputScreenState extends State<TravelInputScreen> {
 
   final List<String> transportOptions = ['대중교통/도보', '승용차'];
   final List<String> regionOptions = [
-    '충남 전체',
     '천안',
     '아산',
-    '공주',
-    '보령',
-    '서산',
-    '태안',
   ];
   final List<String> durationOptions = ['당일치기', '1박 2일', '2박 3일', '3박 4일'];
   final List<String> themeOptions = ['힐링', '맛집', '액티비티', '역사/문화', '바다', '카페'];
