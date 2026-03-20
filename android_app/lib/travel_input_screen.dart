@@ -12,7 +12,7 @@ class TravelInputScreen extends StatefulWidget {
 class _TravelInputScreenState extends State<TravelInputScreen> {
   String selectedTransport = '대중교통/도보';
   int personCount = 1;
-  String selectedRegion = '충남 전체';
+  String selectedRegion = '천안';
   String duration = '당일치기';
   final List<String> selectedThemes = [];
   bool isLoading = false;
