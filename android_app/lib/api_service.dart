@@ -4,8 +4,8 @@ import 'package:http/http.dart' as http;
 class ApiService {
   // ngrok 사용 시: static const String baseUrl = 'https://[생성된주소].ngrok.app';
   // 공인 IP 사용 시: static const String baseUrl = 'http://[집의_공인_IP]:8080';
-  static const String baseUrl = 'https://nonschematized-pseudofeverish-ka.ngrok-free.dev';
-
+  //static const String baseUrl = 'https://nonschematized-pseudofeverish-ka.ngrok-free.dev';
+  static const String baseUrl = 'http://10.0.2.2:8080';
   static Future<Map<String, dynamic>?> getRecommendation({
     required String transport,
     required int personCount,

@@ -16,25 +16,23 @@ class TravelResultScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // 서버 데이터 추출 (없을 경우 기본값)
     String reason = aiData['reason'] ?? '이유를 불러올 수 없습니다.';
     List<dynamic> course = aiData['recommended_course'] ?? [];
     String time = aiData['total_time'] ?? '시간 정보 없음';
 
     return Scaffold(
-      backgroundColor: Colors.grey.shade100, // 전체 배경색을 살짝 어둡게 주어 카드가 돋보이게 함
+      backgroundColor: Colors.grey.shade100,
       appBar: AppBar(
         title: const Text('AI 맞춤 여행 코스', style: TextStyle(fontWeight: FontWeight.bold)),
         backgroundColor: Colors.white,
         foregroundColor: Colors.black,
-        elevation: 0, // 상단바 그림자 제거로 깔끔하게
+        elevation: 0,
         centerTitle: true,
       ),
       body: SingleChildScrollView(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // 1. 가상의 지도 영역 (추후 카카오맵/구글맵 연동할 자리)
             Container(
               height: 200,
               width: double.infinity,
@@ -48,13 +46,11 @@ class TravelResultScreen extends StatelessWidget {
                 ],
               ),
             ),
-
             Padding(
               padding: const EdgeInsets.all(16.0),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // 2. 사용자가 선택한 기본 정보 요약 칩
                   Wrap(
                     spacing: 8.0,
                     children: [
@@ -76,8 +72,6 @@ class TravelResultScreen extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: 20),
-
-                  // 3. AI 추천 이유 카드
                   Card(
                     color: Colors.white,
                     elevation: 2,
@@ -87,11 +81,11 @@ class TravelResultScreen extends StatelessWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Row(
+                          const Row(
                             children: [
-                              const Icon(Icons.auto_awesome, color: Colors.amber),
-                              const SizedBox(width: 8),
-                              const Text('AI의 추천 코멘트', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                              Icon(Icons.auto_awesome, color: Colors.amber),
+                              SizedBox(width: 8),
+                              Text('AI의 추천 코멘트', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                             ],
                           ),
                           const Divider(),
@@ -101,11 +95,8 @@ class TravelResultScreen extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 20),
-
-                  // 4. 추천 코스 타임라인 영역
                   const Text('이동 동선', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 16),
-
                   Card(
                     color: Colors.white,
                     elevation: 2,
@@ -115,14 +106,12 @@ class TravelResultScreen extends StatelessWidget {
                       child: Column(
                         children: List.generate(course.length, (index) {
                           bool isLast = index == course.length - 1;
-                          return _buildTimelineItem(course[index].toString(), isLast, index + 1);
+                          return _buildTimelineItem(course[index] as Map<String, dynamic>, isLast, index + 1);
                         }),
                       ),
                     ),
                   ),
                   const SizedBox(height: 20),
-
-                  // 5. 총 예상 소요 시간 카드
                   Card(
                     color: Colors.white,
                     elevation: 2,
@@ -143,19 +132,21 @@ class TravelResultScreen extends StatelessWidget {
     );
   }
 
-  // 타임라인 UI를 그려주는 내부 함수
-  Widget _buildTimelineItem(String placeName, bool isLast, int stepNumber) {
+  Widget _buildTimelineItem(Map<String, dynamic> place, bool isLast, int stepNumber) {
+    String name = place['name'] ?? '이름 없음';
+    String address = place['address'] ?? '주소 없음';
+    String category = place['category'] ?? '';
+
     return IntrinsicHeight(
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 왼쪽: 점과 선 그려주는 영역
           Column(
             children: [
               Container(
                 width: 24,
                 height: 24,
-                decoration: BoxDecoration(
+                decoration: const BoxDecoration(
                   color: Colors.blue,
                   shape: BoxShape.circle,
                 ),
@@ -170,19 +161,46 @@ class TravelResultScreen extends StatelessWidget {
                 Expanded(
                   child: Container(
                     width: 2,
-                    color: Colors.blue.shade200, // 다음 장소로 이어지는 선
+                    color: Colors.blue.shade200,
                   ),
                 ),
             ],
           ),
           const SizedBox(width: 16),
-          // 오른쪽: 장소 이름 텍스트 영역
           Expanded(
             child: Padding(
-              padding: const EdgeInsets.only(bottom: 24.0), // 각 장소 간의 간격
-              child: Text(
-                placeName,
-                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, height: 1.2),
+              padding: const EdgeInsets.only(bottom: 24.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          name,
+                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, height: 1.2),
+                        ),
+                      ),
+                      if (category.isNotEmpty)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: Colors.grey.shade200,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            category,
+                            style: const TextStyle(fontSize: 12, color: Colors.black54),
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    address,
+                    style: const TextStyle(fontSize: 13, color: Colors.grey),
+                  ),
+                ],
               ),
             ),
           ),
