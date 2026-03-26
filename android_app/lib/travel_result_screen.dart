@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class TravelResultScreen extends StatelessWidget {
   final String region;
@@ -14,11 +15,45 @@ class TravelResultScreen extends StatelessWidget {
     required this.aiData,
   });
 
+  Future<void> _openKakaoMapRoute(BuildContext context, Map<String, dynamic>? start, Map<String, dynamic> end) async {
+    final double eLat = end['lat'];
+    final double eLng = end['lng'];
+
+    String appUrlString = 'kakaomap://route?ep=$eLat,$eLng';
+
+    if (start != null) {
+      final double sLat = start['lat'];
+      final double sLng = start['lng'];
+      appUrlString += '&sp=$sLat,$sLng';
+    }
+
+    final Uri appUri = Uri.parse(appUrlString);
+
+    if (await canLaunchUrl(appUri)) {
+      await launchUrl(appUri);
+    } else {
+      final String eName = (end['name'] ?? '도착지').toString().replaceAll(',', ' ');
+      final String webUrlString = 'https://map.kakao.com/link/to/$eName,$eLat,$eLng';
+      final Uri webUri = Uri.parse(Uri.encodeFull(webUrlString));
+
+      if (await canLaunchUrl(webUri)) {
+        await launchUrl(webUri, mode: LaunchMode.externalApplication);
+      } else {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('지도를 열 수 없습니다.')),
+          );
+        }
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     String reason = aiData['reason'] ?? '이유를 불러올 수 없습니다.';
     List<dynamic> course = aiData['recommended_course'] ?? [];
     String time = aiData['total_time'] ?? '시간 정보 없음';
+    Map<String, dynamic>? startHub = aiData['start_hub'];
 
     return Scaffold(
       backgroundColor: Colors.grey.shade100,
@@ -106,7 +141,21 @@ class TravelResultScreen extends StatelessWidget {
                       child: Column(
                         children: List.generate(course.length, (index) {
                           bool isLast = index == course.length - 1;
-                          return _buildTimelineItem(course[index] as Map<String, dynamic>, isLast, index + 1);
+
+                          Map<String, dynamic>? prevPlace;
+                          if (index == 0) {
+                            prevPlace = startHub;
+                          } else {
+                            prevPlace = course[index - 1];
+                          }
+
+                          return _buildTimelineItem(
+                              context,
+                              course[index] as Map<String, dynamic>,
+                              isLast,
+                              index + 1,
+                              prevPlace
+                          );
                         }),
                       ),
                     ),
@@ -132,7 +181,7 @@ class TravelResultScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildTimelineItem(Map<String, dynamic> place, bool isLast, int stepNumber) {
+  Widget _buildTimelineItem(BuildContext context, Map<String, dynamic> place, bool isLast, int stepNumber, Map<String, dynamic>? prevPlace) {
     String name = place['name'] ?? '이름 없음';
     String address = place['address'] ?? '주소 없음';
     String category = place['category'] ?? '';
@@ -199,6 +248,26 @@ class TravelResultScreen extends StatelessWidget {
                   Text(
                     address,
                     style: const TextStyle(fontSize: 13, color: Colors.grey),
+                  ),
+                  const SizedBox(height: 8),
+
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: ElevatedButton.icon(
+                      onPressed: () => _openKakaoMapRoute(context, prevPlace, place),
+                      icon: const Icon(Icons.directions, size: 16),
+                      label: Text(
+                          stepNumber == 1 && prevPlace == null
+                              ? '내 위치에서 출발'
+                              : (stepNumber == 1 ? '역/터미널에서 출발' : '이전 장소에서 출발')
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.blue.shade50,
+                        foregroundColor: Colors.blue.shade700,
+                        elevation: 0,
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      ),
+                    ),
                   ),
                 ],
               ),
