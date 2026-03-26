@@ -13,7 +13,6 @@ app.post('/ai-predict', async (req, res) => {
         console.log("[Node.js] 앱에서 받은 데이터:", req.body);
         
         const flaskResponse = await axios.post(FLASK_SERVER_URL, req.body);
-        
         console.log("[Node.js] Flask 응답:", flaskResponse.data);
 
         res.status(200).json({
