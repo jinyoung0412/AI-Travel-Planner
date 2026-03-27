@@ -1,5 +1,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
+    <queries>
+        <package android:name="net.daum.android.map" />
+    </queries>
     <application
         android:label="ai_travel_app"
         android:name="${applicationName}"
