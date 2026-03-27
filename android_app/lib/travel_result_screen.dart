@@ -50,9 +50,7 @@ class TravelResultScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    String reason = aiData['reason'] ?? '이유를 불러올 수 없습니다.';
     List<dynamic> course = aiData['recommended_course'] ?? [];
-    String time = aiData['total_time'] ?? '시간 정보 없음';
     Map<String, dynamic>? startHub = aiData['start_hub'];
 
     return Scaffold(
@@ -65,117 +63,65 @@ class TravelResultScreen extends StatelessWidget {
         centerTitle: true,
       ),
       body: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Container(
-              height: 200,
-              width: double.infinity,
-              color: Colors.blue.shade50,
-              child: const Column(
-                mainAxisAlignment: MainAxisAlignment.center,
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Wrap(
+                spacing: 8.0,
                 children: [
-                  Icon(Icons.map_outlined, size: 50, color: Colors.blue),
-                  SizedBox(height: 8),
-                  Text('지도 API 연동 대기중', style: TextStyle(color: Colors.blue, fontWeight: FontWeight.bold)),
+                  Chip(
+                    label: Text(region),
+                    backgroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                  Chip(
+                    label: Text(duration),
+                    backgroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                  ...themes.map((theme) => Chip(
+                    label: Text(theme, style: const TextStyle(color: Colors.white)),
+                    backgroundColor: Colors.blue,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  )),
                 ],
               ),
-            ),
-            Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Wrap(
-                    spacing: 8.0,
-                    children: [
-                      Chip(
-                        label: Text(region),
-                        backgroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                      ),
-                      Chip(
-                        label: Text(duration),
-                        backgroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                      ),
-                      ...themes.map((theme) => Chip(
-                        label: Text(theme, style: const TextStyle(color: Colors.white)),
-                        backgroundColor: Colors.blue,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                      )),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
-                  Card(
-                    color: Colors.white,
-                    elevation: 2,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    child: Padding(
-                      padding: const EdgeInsets.all(16.0),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Row(
-                            children: [
-                              Icon(Icons.auto_awesome, color: Colors.amber),
-                              SizedBox(width: 8),
-                              Text('AI의 추천 코멘트', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                            ],
-                          ),
-                          const Divider(),
-                          Text(reason, style: const TextStyle(fontSize: 15, height: 1.5, color: Colors.black87)),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  const Text('이동 동선', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 16),
-                  Card(
-                    color: Colors.white,
-                    elevation: 2,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    child: Padding(
-                      padding: const EdgeInsets.all(16.0),
-                      child: Column(
-                        children: List.generate(course.length, (index) {
-                          bool isLast = index == course.length - 1;
+              const SizedBox(height: 20),
+              const Text('이동 동선', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 16),
+              Card(
+                color: Colors.white,
+                elevation: 2,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    children: List.generate(course.length, (index) {
+                      bool isLast = index == course.length - 1;
 
-                          Map<String, dynamic>? prevPlace;
-                          if (index == 0) {
-                            prevPlace = startHub;
-                          } else {
-                            prevPlace = course[index - 1];
-                          }
+                      Map<String, dynamic>? prevPlace;
+                      if (index == 0) {
+                        prevPlace = startHub;
+                      } else {
+                        prevPlace = course[index - 1];
+                      }
 
-                          return _buildTimelineItem(
-                              context,
-                              course[index] as Map<String, dynamic>,
-                              isLast,
-                              index + 1,
-                              prevPlace
-                          );
-                        }),
-                      ),
-                    ),
+                      return _buildTimelineItem(
+                          context,
+                          course[index] as Map<String, dynamic>,
+                          isLast,
+                          index + 1,
+                          prevPlace
+                      );
+                    }),
                   ),
-                  const SizedBox(height: 20),
-                  Card(
-                    color: Colors.white,
-                    elevation: 2,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    child: ListTile(
-                      leading: const Icon(Icons.timer, color: Colors.blue, size: 30),
-                      title: const Text('총 예상 소요 시간', style: TextStyle(fontWeight: FontWeight.bold)),
-                      trailing: Text(time, style: const TextStyle(fontSize: 16, color: Colors.blue, fontWeight: FontWeight.bold)),
-                    ),
-                  ),
-                  const SizedBox(height: 30),
-                ],
+                ),
               ),
-            ),
-          ],
+              const SizedBox(height: 30),
+            ],
+          ),
         ),
       ),
     );
@@ -250,7 +196,6 @@ class TravelResultScreen extends StatelessWidget {
                     style: const TextStyle(fontSize: 13, color: Colors.grey),
                   ),
                   const SizedBox(height: 8),
-
                   Align(
                     alignment: Alignment.centerLeft,
                     child: ElevatedButton.icon(
