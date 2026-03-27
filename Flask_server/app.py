@@ -10,10 +10,6 @@ app = Flask(__name__)
 @app.route('/ai-predict', methods=['POST'])
 def ai_predict():
     try:
-        print("\n" + "="*50)
-        print("[V5 행정구역 엄격 필터링 버전] 요청 수신")
-        print("="*50)
-        
         data = request.get_json()
         print(f"[Flask] 프론트엔드 수신 데이터: {data}")
         
@@ -56,12 +52,6 @@ def ai_predict():
                 df = df[df['주소'].str.contains('천안시', na=False)]
             else:
                 df = df[df['주소'].str.contains('천안시|아산시', na=False)]
-            
-            themes_str = ', '.join(themes) if themes else '선택없음'
-            reason_text = f"'{themes_str}' 테마의 장소가 부족하여, {region_target} 전체 핫플레이스를 기반으로 구성한 맞춤 코스입니다."
-        else:
-            themes_str = ', '.join(themes)
-            reason_text = f"선택하신 '{themes_str}' 테마와 '{transport}' 접근성을 고려한 {region_target} 최적화 코스입니다."
 
         clustered_df = perform_clustering(df, transport=transport)
         final_route, start_point, start_name = get_best_route(clustered_df, transport=transport, region=region_target)
@@ -85,10 +75,8 @@ def ai_predict():
             }
         
         response_data = {
-            "reason": reason_text,
             "start_hub": start_hub_data,
-            "recommended_course": course_data,
-            "total_time": f"약 {len(course_data) * 3}시간"
+            "recommended_course": course_data
         }
         
         print("[Flask] AI 연산 완료 및 응답 데이터 전송 성공")
