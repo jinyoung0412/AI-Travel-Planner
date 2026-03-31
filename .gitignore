@@ -34,3 +34,8 @@ error_log.txt
 # VS Code나 IntelliJ 설정 파일 올라가는 것 차단
 .vscode/
 .idea/
+
+# =========================
+# 5. Claude Code
+# =========================
+CLAUDE.md
