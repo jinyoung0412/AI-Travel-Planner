@@ -39,3 +39,4 @@ error_log.txt
 # 5. Claude Code
 # =========================
 CLAUDE.md
+.claude/
