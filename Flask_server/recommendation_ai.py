@@ -30,6 +30,20 @@ from geopy.distance import geodesic
 #    → 인기 점수를 유효 거리로 나눠 가깝고 인기있는 장소를 우선 추천
 #    → +0.1은 D_eff가 0에 가까울 때 R이 무한대로 발산하는 것을 방지
 #    → S와 D_eff 모두 정규화되어 있으므로 두 요소가 균형있게 반영됨
+#
+# 5. 최적 군집 선택 기준
+#    → 각 군집마다 해당 군집 중심에서 가장 가까운 교통 거점을 기준으로
+#      군집 내 모든 장소의 R을 계산한 뒤, 군집 평균 R이 가장 높은 군집 선택
+#    → 기존에는 인기도(S)만으로 군집을 선택했기 때문에,
+#      교통 거점에서 멀리 떨어진 군집이 선택되는 문제가 있었음
+#    → 평균 R 기준으로 선택하면 인기도와 접근성을 동시에 고려하게 됨
+#
+# 6. 거리 정규화 기준
+#    → 군집 내부 기준이 아닌 전체 유효 군집의 거리를 합산하여 전역 정규화 수행
+#    → 기존에는 군집별로 거리를 독립적으로 정규화했기 때문에,
+#      실제로 멀리 있는 군집도 내부적으로 0~1로 정규화되어
+#      절대 거리가 무시되는 문제가 있었음
+#    → 전역 정규화를 통해 멀리 있는 장소는 실제로 높은 norm_dist를 가지게 됨
 # ============================================================
 
 def minmax_normalize(series):
@@ -83,27 +97,84 @@ def get_best_start_hub(cluster_center, region):
     closest_hub = min(available_hubs, key=lambda hub: geodesic(cluster_center, (hub['lat'], hub['lon'])).kilometers)
     return (closest_hub['lat'], closest_hub['lon']), closest_hub['name']
 
+def compute_r_for_cluster(cluster_df, start_point, transport, global_min_dist=None, global_max_dist=None):
+    """
+    주어진 군집 내 장소들의 R 점수를 계산하여 반환.
+    거리 정규화는 전역 기준(global_min_dist, global_max_dist)으로 수행.
+    → 군집별 독립 정규화 시 절대 거리가 무시되는 문제를 해결.
+    전역 기준값이 없으면 군집 내부 기준으로 fallback.
+    """
+    df = cluster_df.copy()
+    df['d_real'] = df.apply(
+        lambda row: geodesic(start_point, (row['latitude'], row['longitude'])).kilometers, axis=1
+    )
+
+    if global_min_dist is not None and global_max_dist is not None and global_max_dist > global_min_dist:
+        # 전역 기준 정규화: 절대 거리가 반영됨
+        df['norm_dist'] = (df['d_real'] - global_min_dist) / (global_max_dist - global_min_dist)
+    else:
+        # fallback: 군집 내부 기준 정규화
+        df['norm_dist'] = minmax_normalize(df['d_real'])
+
+    df['D_eff'] = df.apply(lambda row: calculate_eff_dist(row['norm_dist'], row['d_real'], transport), axis=1)
+    df['R'] = df['S'] / (df['D_eff'] + 0.1)
+    return df
+
 def get_best_route(df_input, transport, region="천안/아산"):
     df = df_input.copy()
 
     print(f"\n--- [{region}] 경로 추천 연산 시작 ---")
 
-    # 방문자수, 블로그수 각각 Min-Max 정규화 (0~1)
+    # 방문자수, 블로그수 각각 Min-Max 정규화 (0~1) — 전체 데이터 기준
     df['norm_visitors'] = minmax_normalize(df['방문자수'])
     df['norm_blogs'] = minmax_normalize(df['블로그수'])
 
     # 인기 점수 S 계산 (정규화된 값 기반)
     df['S'] = df.apply(lambda row: calculate_score(row['norm_visitors'], row['norm_blogs']), axis=1)
 
+    global_min_dist = None
+    global_max_dist = None
+
     if 'Cluster' in df.columns and len(df['Cluster'].unique()) > 1:
         cluster_counts = df['Cluster'].value_counts()
         valid_clusters = cluster_counts[cluster_counts >= 3].index
 
         if len(valid_clusters) > 0:
-            valid_df = df[df['Cluster'].isin(valid_clusters)]
-            cluster_scores = valid_df.groupby('Cluster')['S'].mean()
-            best_cluster = cluster_scores.idxmax()
+            # 군집별로 교통 거점을 기준으로 R을 계산하여 최적 군집 선택
+            # → 인기도(S)만 보던 기존 방식에서, 접근성까지 반영한 평균 R 기준으로 변경
+
+            # 전역 거리 정규화 기준 계산
+            # → 모든 유효 군집의 장소-거점 간 거리를 수집하여 전역 min/max 산출
+            # → 이를 통해 군집 간 절대 거리 비교가 가능해짐
+            all_distances = []
+            cluster_start_points = {}
+            for cluster_id in valid_clusters:
+                c_df = df[df['Cluster'] == cluster_id]
+                c_center = (c_df['latitude'].mean(), c_df['longitude'].mean())
+                if transport == '대중교통/도보':
+                    c_start_point, _ = get_best_start_hub(c_center, region)
+                else:
+                    c_start_point = c_center
+                cluster_start_points[cluster_id] = c_start_point
+                distances = c_df.apply(
+                    lambda row: geodesic(c_start_point, (row['latitude'], row['longitude'])).kilometers, axis=1
+                )
+                all_distances.extend(distances.tolist())
+
+            global_min_dist = min(all_distances)
+            global_max_dist = max(all_distances)
+
+            cluster_r_scores = {}
+            for cluster_id in valid_clusters:
+                c_df = df[df['Cluster'] == cluster_id]
+                c_start_point = cluster_start_points[cluster_id]
+                c_df_with_r = compute_r_for_cluster(c_df, c_start_point, transport, global_min_dist, global_max_dist)
+                cluster_r_scores[cluster_id] = c_df_with_r['R'].mean()
+
+            best_cluster = max(cluster_r_scores, key=cluster_r_scores.get)
             best_df = df[df['Cluster'] == best_cluster].copy()
+            print(f"[추천 모듈] 전역 거리 범위: {global_min_dist:.1f}km ~ {global_max_dist:.1f}km")
+            print(f"[추천 모듈] 군집별 평균 R 점수: { {k: round(v, 3) for k, v in cluster_r_scores.items()} }")
             print(f"[추천 모듈] 선택된 최적 군집: {best_cluster}번 (장소 {len(best_df)}개)")
         else:
             best_df = df.copy()
@@ -111,6 +182,7 @@ def get_best_route(df_input, transport, region="천안/아산"):
     else:
         best_df = df.copy()
 
+    # 최적 군집의 교통 거점 확정
     cluster_center = (best_df['latitude'].mean(), best_df['longitude'].mean())
 
     start_name = None
@@ -121,25 +193,15 @@ def get_best_route(df_input, transport, region="천안/아산"):
         start_point = cluster_center
         print(f"[추천 모듈] 자가용 탐색 시작 기준점(군집 중심): {start_point}")
 
-    # 실제 거리 계산 후 정규화
-    best_df['d_real'] = best_df.apply(
-        lambda row: geodesic(start_point, (row['latitude'], row['longitude'])).kilometers, axis=1
-    )
-    best_df['norm_dist'] = minmax_normalize(best_df['d_real'])
-
-    # 유효 거리 D_eff 계산 (정규화된 거리 + 이동수단 패널티)
-    best_df['D_eff'] = best_df.apply(
-        lambda row: calculate_eff_dist(row['norm_dist'], row['d_real'], transport), axis=1
-    )
-
-    # 최종 랭킹 점수 R 계산
-    # R = S / (D_eff + 0.1) — 0.1은 D_eff=0일 때 발산 방지
-    best_df['R'] = best_df['S'] / (best_df['D_eff'] + 0.1)
+    # 최적 군집 내 최종 R 계산 (전역 거리 기준 적용)
+    global_min_dist = global_min_dist if 'global_min_dist' in dir() else None
+    global_max_dist = global_max_dist if 'global_max_dist' in dir() else None
+    best_df = compute_r_for_cluster(best_df, start_point, transport, global_min_dist, global_max_dist)
 
     top_places = best_df.nlargest(3, 'R')
 
     print("\n[추천 모듈] 상위 3개 장소 선정 결과 (순위 로그):")
-    for idx, row in top_places.iterrows():
+    for _, row in top_places.iterrows():
         print(f"- {row['가게명']} | 방문자:{row['방문자수']}, 블로그:{row['블로그수']} | 인기점수(S):{row['S']:.3f} | 실제거리:{row['d_real']:.1f}km | 유효거리(D_eff):{row['D_eff']:.3f} | 최종점수(R):{row['R']:.3f}")
 
     final_route = []
