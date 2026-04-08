@@ -16,6 +16,8 @@ def ai_predict():
         themes = data.get('themes', [])
         region_req = str(data.get('region', '천안/아산')).strip()
         transport = data.get('transport', '대중교통/도보')
+        user_lat = data.get('userLat', None)
+        user_lng = data.get('userLng', None)
         
         file_path = r'C:\AI-Travel-Planner\Preprocess\data\processed\chungnam_places_filtered.csv'
         
@@ -54,7 +56,7 @@ def ai_predict():
                 df = df[df['주소'].str.contains('천안시|아산시', na=False)]
 
         clustered_df = perform_clustering(df, transport=transport)
-        final_route, start_point, start_name = get_best_route(clustered_df, transport=transport, region=region_target)
+        final_route, start_point, start_name = get_best_route(clustered_df, transport=transport, region=region_target, user_lat=user_lat, user_lng=user_lng)
         
         course_data = []
         for place in final_route:

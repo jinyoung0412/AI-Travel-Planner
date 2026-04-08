@@ -120,7 +120,7 @@ def compute_r_for_cluster(cluster_df, start_point, transport, global_min_dist=No
     df['R'] = df['S'] / (df['D_eff'] + 0.1)
     return df
 
-def get_best_route(df_input, transport, region="천안/아산"):
+def get_best_route(df_input, transport, region="천안/아산", user_lat=None, user_lng=None):
     df = df_input.copy()
 
     print(f"\n--- [{region}] 경로 추천 연산 시작 ---")
@@ -190,8 +190,14 @@ def get_best_route(df_input, transport, region="천안/아산"):
         start_point, start_name = get_best_start_hub(cluster_center, region)
         print(f"[추천 모듈] 대중교통 탐색 시작 기준점: {start_name} {start_point}")
     else:
-        start_point = cluster_center
-        print(f"[추천 모듈] 자가용 탐색 시작 기준점(군집 중심): {start_point}")
+        if user_lat is not None and user_lng is not None:
+            # GPS 좌표가 전달된 경우 실제 사용자 위치를 출발점으로 사용
+            start_point = (user_lat, user_lng)
+            print(f"[추천 모듈] 자가용 탐색 시작 기준점(GPS 현재 위치): {start_point}")
+        else:
+            # GPS 좌표가 없으면 군집 중심으로 fallback
+            start_point = cluster_center
+            print(f"[추천 모듈] 자가용 탐색 시작 기준점(군집 중심 fallback): {start_point}")
 
     # 최적 군집 내 최종 R 계산 (전역 거리 기준 적용)
     global_min_dist = global_min_dist if 'global_min_dist' in dir() else None
