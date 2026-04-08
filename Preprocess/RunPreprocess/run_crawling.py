@@ -16,15 +16,8 @@ sys.path.append(project_dir)
 
 from Preprocess.crawler.crawler_core import ChungnamCrawler
 
-try:
-    from region_list import REGIONS
-except ImportError:
-    sys.exit(1)
-
-try:
-    from categories import CATEGORIES
-except ImportError:
-    sys.exit(1)
+from Preprocess.crawler.region_list import REGIONS
+from Preprocess.crawler.categories import CATEGORIES
 
 def run_worker_silent(args):
     region, categories, q = args
