@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import 'travel_result_screen.dart';
 import 'api_service.dart';
 
@@ -16,6 +17,8 @@ class _TravelInputScreenState extends State<TravelInputScreen> {
   String duration = '당일치기';
   final List<String> selectedThemes = [];
   bool isLoading = false;
+  double? currentLat;
+  double? currentLng;
 
   final List<String> transportOptions = ['대중교통/도보', '승용차'];
   final List<String> regionOptions = [
@@ -24,6 +27,38 @@ class _TravelInputScreenState extends State<TravelInputScreen> {
   ];
   final List<String> durationOptions = ['당일치기', '1박 2일', '2박 3일', '3박 4일'];
   final List<String> themeOptions = ['힐링', '맛집', '액티비티', '역사/문화', '바다', '카페'];
+
+  Future<bool> _fetchCurrentLocation() async {
+    LocationPermission permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+      if (permission == LocationPermission.denied) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('위치 권한이 거부되었습니다. 승용차 이동 시 위치 정보가 필요합니다.')),
+          );
+        }
+        return false;
+      }
+    }
+    if (permission == LocationPermission.deniedForever) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('위치 권한이 영구적으로 거부되었습니다. 설정에서 권한을 허용해주세요.')),
+        );
+      }
+      return false;
+    }
+
+    final position = await Geolocator.getCurrentPosition(
+      locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+    );
+    setState(() {
+      currentLat = position.latitude;
+      currentLng = position.longitude;
+    });
+    return true;
+  }
 
   int _convertDurationToDays(String durationStr) {
     if (durationStr == '1박 2일') return 2;
@@ -155,9 +190,16 @@ class _TravelInputScreenState extends State<TravelInputScreen> {
                           return;
                         }
 
-                        setState(() {
-                          isLoading = true;
-                        });
+                        setState(() => isLoading = true);
+
+                        // 승용차 선택 시 현재 위치 수집
+                        if (selectedTransport == '승용차') {
+                          final success = await _fetchCurrentLocation();
+                          if (!success) {
+                            setState(() => isLoading = false);
+                            return;
+                          }
+                        }
 
                         try {
                           int requestDays = _convertDurationToDays(duration);
@@ -169,6 +211,8 @@ class _TravelInputScreenState extends State<TravelInputScreen> {
                             duration: duration,
                             days: requestDays,
                             themes: selectedThemes,
+                            userLat: currentLat,
+                            userLng: currentLng,
                           );
 
                           setState(() {
