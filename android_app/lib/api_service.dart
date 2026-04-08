@@ -13,6 +13,8 @@ class ApiService {
     required String duration,
     required int days,
     required List<String> themes,
+    double? userLat,
+    double? userLng,
   }) async {
     try {
       final response = await http.post(
@@ -25,6 +27,8 @@ class ApiService {
           'duration': duration,
           'days': days,
           'themes': themes,
+          if (userLat != null) 'userLat': userLat,
+          if (userLng != null) 'userLng': userLng,
         }),
       );
 
