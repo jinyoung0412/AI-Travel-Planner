@@ -11,10 +11,10 @@ from Preprocess.crawler.iframe_utils import (
 from Preprocess.crawler.pagination import go_next_page
 from Preprocess.crawler.parser import extract_list_items, extract_name_element, parse_detail_page
 from Preprocess.crawler.saver import (
-    get_csv_path, save_item, touch_init_file, 
+    get_csv_path, save_item, touch_init_file,
     mark_task_completed, is_task_completed
 )
-from Preprocess.crawler.throttler import throttle_page_delay
+from Preprocess.crawler.throttler import throttle_click_delay, throttle_page_delay
 
 class ChungnamCrawler:
     def __init__(self):
@@ -67,8 +67,10 @@ class ChungnamCrawler:
             try:
                 self.driver.switch_to.default_content()
                 box = self.driver.find_element(By.CSS_SELECTOR, "input.input_search")
-                box.clear()
-                time.sleep(0.5)
+                # clear()는 React 기반 네이버 지도에서 내부 상태를 초기화하지 못함
+                # → Ctrl+A로 전체 선택 후 새 키워드 입력으로 대체
+                box.click()
+                box.send_keys(Keys.CONTROL + 'a')
                 box.send_keys(keyword)
                 box.send_keys(Keys.ENTER)
                 time.sleep(2)
@@ -144,10 +146,11 @@ class ChungnamCrawler:
         total_count = len(initial_items)
         if total_count == 0:
             return 0
-            
+
         need_refresh = True
         current_items = []
-        
+        new_count = 0  # 이 페이지에서 실제로 새로 저장한 항목 수
+
         for idx in range(total_count):
             try:
                 if need_refresh:
@@ -161,10 +164,10 @@ class ChungnamCrawler:
                 if idx >= len(current_items): break
                 item = current_items[idx]
                 el, name = extract_name_element(item)
-                
-                if not name or name in existing: 
+
+                if not name or name in existing:
                     continue
-                
+
                 is_excluded = any(kw in name for kw in self.exclude_keywords)
                 if is_excluded:
                     continue
@@ -172,14 +175,14 @@ class ChungnamCrawler:
                 self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", el)
                 time.sleep(0.3)
                 self.driver.execute_script("arguments[0].click();", el)
-                time.sleep(1.0) 
-                
+                time.sleep(1.0)
+
                 need_refresh = True
-                
+
                 if self.check_and_close_popup():
                     self.driver.switch_to.default_content()
                     frames = self.driver.find_elements(By.ID, "searchIframe")
-                    if frames: 
+                    if frames:
                         self.driver.switch_to.frame(frames[0])
                         retry_items = extract_list_items(self.driver)
                         if idx < len(retry_items):
@@ -194,8 +197,8 @@ class ChungnamCrawler:
                                 time.sleep(1.5)
                                 if self.check_and_close_popup(): continue
                             else: continue
-                    else: continue 
-                    
+                    else: continue
+
                 cat, addr, v_rev, b_rev, op_time = parse_detail_page(self.driver)
                 save_item(csv_path, {
                     "page": page, "rank": idx + 1, "name": name,
@@ -204,7 +207,9 @@ class ChungnamCrawler:
                     "blog_review": b_rev, "operating_time": op_time
                 })
                 existing.add(name)
-                
+                new_count += 1
+                throttle_click_delay()
+
             except KeyboardInterrupt:
                 raise
             except Exception:
@@ -219,7 +224,8 @@ class ChungnamCrawler:
                 except Exception:
                     pass
 
-        return total_count
+        # 새로 저장한 항목이 없으면 0 반환 → 호출부에서 다음 페이지로 넘어가지 않음
+        return new_count
 
     def crawl_region_all_categories(self, region, categories, q=None):
         existing_names = self.load_existing_names_for_region(region)
@@ -237,7 +243,7 @@ class ChungnamCrawler:
                 if is_task_completed(region, category):
                     continue
 
-                if processed_cats > 0 and processed_cats % 10 == 0:
+                if processed_cats > 0 and processed_cats % 1 == 0:
                     try:
                         self.stop_driver()
                         self.start_driver()
@@ -261,7 +267,7 @@ class ChungnamCrawler:
                         if not go_next_page(self.driver): break
                         throttle_page_delay()
                         page += 1
-                
+
                 mark_task_completed(region, category)
                 processed_cats += 1
 
@@ -269,8 +275,8 @@ class ChungnamCrawler:
                 raise
             except Exception:
                 pass
-        
-        if q: 
-            q.put(1)
-            
+            finally:
+                if q:
+                    q.put(1)
+
         self.stop_driver()

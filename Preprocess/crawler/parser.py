@@ -108,63 +108,63 @@ def parse_detail_page(driver):
     except: 
         pass
 
-    op_time = ""
-    try:
-        candidates = driver.find_elements(By.CSS_SELECTOR, "svg.DNzQ2, a[aria-expanded='false'], span._UCia")
-        for el in candidates:
-            try:
-                target_btn = el
-                if el.tag_name == 'svg':
-                    target_btn = el.find_element(By.XPATH, "./..")
-                
-                href = target_btn.get_attribute("href")
-                if href and ("suggestion" in href or "smartplace" in href): 
-                    continue
-                if "수정" in target_btn.text or "제안" in target_btn.text: 
-                    continue
-
-                driver.execute_script("arguments[0].click();", target_btn)
-                time.sleep(0.1)
-            except: 
-                pass
-        
-        time.sleep(0.5)
-
-        day_elements = driver.find_elements(By.CSS_SELECTOR, "span.i8cJw")
-        time_list = []
-        
-        if day_elements:
-            for day_el in day_elements:
-                try:
-                    row_text = day_el.find_element(By.XPATH, "./../..").text.strip()
-                    time_list.append(row_text.replace("\n", " "))
-                except: 
-                    pass
-        else:
-            backup_els = driver.find_elements(By.CSS_SELECTOR, "div.A_cdD, span.A_cdD")
-            for el in backup_els:
-                t = el.text.strip().replace("\n", " ")
-                if "원" not in t and any(c.isdigit() for c in t) and ("매일" in t or "영업" in t):
-                    time_list.append(t)
-
-        bad_keywords = ["방송", "투데이", "고향", "생생", "2TV", "회,", "출연", "접기", "방영", "맛집", "수요미식회"]
-        clean_times = []
-        for t in time_list:
-            if not any(bad in t for bad in bad_keywords):
-                clean_times.append(t)
-
-        if clean_times:
-            seen = set()
-            unique_times = []
-            for t in clean_times:
-                if t not in seen:
-                    unique_times.append(t)
-                    seen.add(t)
-            op_time = " | ".join(unique_times)
-        else:
-            op_time = "시간없음"
-
-    except Exception:
-        op_time = "시간없음"
+    op_time = "시간없음"
+    # try:
+    #     candidates = driver.find_elements(By.CSS_SELECTOR, "svg.DNzQ2, a[aria-expanded='false'], span._UCia")
+    #     for el in candidates:
+    #         try:
+    #             target_btn = el
+    #             if el.tag_name == 'svg':
+    #                 target_btn = el.find_element(By.XPATH, "./..")
+    #
+    #             href = target_btn.get_attribute("href")
+    #             if href and ("suggestion" in href or "smartplace" in href):
+    #                 continue
+    #             if "수정" in target_btn.text or "제안" in target_btn.text:
+    #                 continue
+    #
+    #             driver.execute_script("arguments[0].click();", target_btn)
+    #             time.sleep(0.1)
+    #         except:
+    #             pass
+    #
+    #     time.sleep(0.5)
+    #
+    #     day_elements = driver.find_elements(By.CSS_SELECTOR, "span.i8cJw")
+    #     time_list = []
+    #
+    #     if day_elements:
+    #         for day_el in day_elements:
+    #             try:
+    #                 row_text = day_el.find_element(By.XPATH, "./../..").text.strip()
+    #                 time_list.append(row_text.replace("\n", " "))
+    #             except:
+    #                 pass
+    #     else:
+    #         backup_els = driver.find_elements(By.CSS_SELECTOR, "div.A_cdD, span.A_cdD")
+    #         for el in backup_els:
+    #             t = el.text.strip().replace("\n", " ")
+    #             if "원" not in t and any(c.isdigit() for c in t) and ("매일" in t or "영업" in t):
+    #                 time_list.append(t)
+    #
+    #     bad_keywords = ["방송", "투데이", "고향", "생생", "2TV", "회,", "출연", "접기", "방영", "맛집", "수요미식회"]
+    #     clean_times = []
+    #     for t in time_list:
+    #         if not any(bad in t for bad in bad_keywords):
+    #             clean_times.append(t)
+    #
+    #     if clean_times:
+    #         seen = set()
+    #         unique_times = []
+    #         for t in clean_times:
+    #             if t not in seen:
+    #                 unique_times.append(t)
+    #                 seen.add(t)
+    #         op_time = " | ".join(unique_times)
+    #     else:
+    #         op_time = "시간없음"
+    #
+    # except Exception:
+    #     op_time = "시간없음"
 
     return cat, addr, v, b, op_time
