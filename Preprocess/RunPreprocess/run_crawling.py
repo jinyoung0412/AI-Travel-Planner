@@ -78,18 +78,45 @@ if __name__ == "__main__":
     
     pool.close()
 
+    def format_eta(seconds):
+        if seconds < 0:
+            return "--:--:--"
+        h = int(seconds // 3600)
+        m = int((seconds % 3600) // 60)
+        s = int(seconds % 60)
+        return f"{h:02d}:{m:02d}:{s:02d}"
+
+    def print_progress(completed, total, start_time):
+        bar_length = 30
+        filled = int(bar_length * completed // total)
+        bar = '=' * filled + '-' * (bar_length - filled)
+        percent = completed / total * 100
+
+        elapsed = time.time() - start_time
+        if completed > 0:
+            eta = elapsed / completed * (total - completed)
+            eta_str = format_eta(eta)
+        else:
+            eta_str = "--:--:--"
+
+        elapsed_str = format_eta(elapsed)
+        sys.stdout.write(
+            f"\r진행률: [{bar}] {percent:5.1f}%  "
+            f"({completed}/{total})  "
+            f"경과: {elapsed_str}  남은시간: {eta_str}   "
+        )
+        sys.stdout.flush()
+
+    start_time = time.time()
+    # 시작 즉시 0% 상태 출력
+    print_progress(0, total_subtasks, start_time)
+
     completed_subtasks = 0
     while completed_subtasks < total_subtasks:
         q.get()
         completed_subtasks += 1
-        
-        percent = (completed_subtasks / total_subtasks) * 100
-        bar_length = 30
-        filled_length = int(bar_length * completed_subtasks // total_subtasks)
-        bar = '=' * filled_length + '-' * (bar_length - filled_length)
-        
-        sys.stdout.write(f"\r진행률: [{bar}] {percent:6.2f}% ({completed_subtasks}/{total_subtasks})          ")
-        sys.stdout.flush()
+        print_progress(completed_subtasks, total_subtasks, start_time)
 
     pool.join()
-    print(f"\n\n모든 작업이 완료되었습니다.")
+    total_elapsed = format_eta(time.time() - start_time)
+    print(f"\n\n모든 작업이 완료되었습니다. (총 소요시간: {total_elapsed})")
