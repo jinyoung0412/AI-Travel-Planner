@@ -6,6 +6,26 @@ import time
 from tqdm import tqdm
 from dotenv import load_dotenv
 
+EXCLUDE_CATEGORIES = {
+    # 골프 (중년층 특화 운동 시설 — 나들이 목적지 아님)
+    '스크린골프장', '실내골프연습장', '실외골프연습장',
+    '파크골프장', '골프장코스', 'par3골프장', '골프연습장', '골프용품',
+    # 격투/무예 도장 (정기 훈련 목적, 여행지 아님)
+    '복싱,권투장', '킥복싱', '무예,격투기', '태권도장',
+    '검도장', '유도장', '합기도', '가라테,공수도',
+    # 일반 운동 시설 (정기 이용 목적)
+    '체육관', '실내체육관', '구민체육센터',
+    '풋살장', '배드민턴장', '축구장', '종합운동장', '스쿼시장',
+    '보조경기장', '야구연습장',
+    # 부속/인프라 (독립 장소가 아닌 것)
+    '부속시설', '부속건물', '콘도,리조트부속건물', '펜션부속시설',
+    '화장실', '고속도로시설', '관리,안내', '예정,공사중',
+    # 유흥
+    '유흥주점', '단란주점',
+    # 볼링장, 스크린야구장, 당구장, 수영장, 스케이트장 계열은 나들이 목적지로 유지
+}
+
+
 def run_pipeline():
     print("=" * 50)
     print("데이터 전처리 파이프라인 시작")
@@ -70,6 +90,11 @@ def run_pipeline():
         merged_df.drop_duplicates(subset=["가게명", "주소"], keep="first", inplace=True)
         removed = before - len(merged_df)
         print(f"중복 제거: {removed}개 제거됨")
+
+    if "카테고리" in merged_df.columns:
+        before = len(merged_df)
+        merged_df = merged_df[~merged_df['카테고리'].isin(EXCLUDE_CATEGORIES)].reset_index(drop=True)
+        print(f"카테고리 필터: {before - len(merged_df)}개 제거됨")
     
     merged_df["latitude"] = None
     merged_df["longitude"] = None
