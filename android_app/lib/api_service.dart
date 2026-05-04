@@ -15,6 +15,7 @@ class ApiService {
   static Future<Map<String, dynamic>?> getSpotRecommendation({
     required String userText,
     required String transport,
+    required String region,
     required double userLat,
     required double userLng,
     required List<String> personaTags,
@@ -23,6 +24,7 @@ class ApiService {
     return _post('/recommend/spot', {
       'user_text': userText,
       'transport': transport,
+      'region': region,
       'user_lat': userLat,
       'user_lng': userLng,
       'persona_tags': personaTags,
@@ -32,6 +34,7 @@ class ApiService {
 
   static Future<Map<String, dynamic>?> getCourseRecommendation({
     required String transport,
+    required String region,
     required double userLat,
     required double userLng,
     required List<String> personaTags,
@@ -39,6 +42,7 @@ class ApiService {
   }) async {
     return _post('/recommend/course', {
       'transport': transport,
+      'region': region,
       'user_lat': userLat,
       'user_lng': userLng,
       'persona_tags': personaTags,

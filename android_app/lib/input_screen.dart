@@ -31,6 +31,11 @@ const Map<String, List<Map<String, dynamic>>> _kTransitHubs = {
   ],
 };
 
+// ── 단일 선택 그룹 ('어떤 분위기'만 복수 선택) ──────────────────────
+const Set<String> _kSingleSelectGroups = {
+  '누구와', '특별한 날', '실내 · 야외', '어떤 활동',
+};
+
 // ── 페르소나 태그 그룹 ─────────────────────────────────────────────
 const Map<String, List<String>> _kTagGroups = {
   '누구와': [
@@ -41,7 +46,7 @@ const Map<String, List<String>> _kTagGroups = {
   '어떤 분위기': [
     '힐링/여유', '활동적인', '감성적인', '로맨틱한', '조용한',
     '트렌디한', '고급스러운', '아늑한', '이색적인',
-    '자연 친화적', '소소한 일상', '설레는',
+    '자연 친화적', '소소한 일상', '설레는', '멋진 야경',
   ],
   '특별한 날': [
     '기념일', '생일', '졸업·입학 기념', '프로포즈',
@@ -52,12 +57,9 @@ const Map<String, List<String>> _kTagGroups = {
   ],
   '어떤 활동': [
     '맛집 탐방', '카페 투어', '문화·역사 탐방', '박물관/전시',
-    '쇼핑', '자연/산책', '등산/트레킹', '드라이브',
-    '사진 명소', '야경/저녁', '스포츠/레저', '체험 공방',
-    '전통/한옥', '공원 나들이', '노래방/실내 오락',
-  ],
-  '기타': [
-    '어르신 동반', '반려동물 동반', '가성비', '아이 친화적', '넓은 공간',
+    '쇼핑', '자연/산책', '등산/트레킹',
+    '사진 명소', '스포츠/레저', '체험 공방',
+    '전통/한옥', '노래방/실내 오락',
   ],
 };
 
@@ -72,7 +74,7 @@ class InputScreen extends StatefulWidget {
 class _InputScreenState extends State<InputScreen> {
   final _textController = TextEditingController();
   String _region    = '내 주변';
-  String _transport = '대중교통/도보';
+  String _transport = '대중교통';
   String? _selectedHub; // 대중교통 허브 이름 (조건부 표시)
   int _resultCount  = 5; // spot: 3/5/7/10, course: 1/2/3
   bool _isLoading    = false;
@@ -88,7 +90,7 @@ class _InputScreenState extends State<InputScreen> {
 
   // 대중교통 허브 선택이 필요한 조건
   bool get _needsHub =>
-      _region != '내 주변' && _transport == '대중교통/도보';
+      _region != '내 주변' && _transport == '대중교통';
 
   // 실제로 사용할 출발 좌표
   double? get _effectiveLat {
@@ -148,10 +150,22 @@ class _InputScreenState extends State<InputScreen> {
       final suggested = await ApiService.suggestTags(userText: text);
       if (!mounted) { return; }
       final allTags = _kTagGroups.values.expand((l) => l).toSet();
+      final filtered = suggested.where(allTags.contains).toList();
+      // 단일 선택 그룹은 그룹당 최대 1개만 유지
+      final toAdd = <String>[];
+      for (final entry in _kTagGroups.entries) {
+        final groupTags = entry.value.toSet();
+        final hits = filtered.where(groupTags.contains).toList();
+        if (_kSingleSelectGroups.contains(entry.key)) {
+          if (hits.isNotEmpty) toAdd.add(hits.first);
+        } else {
+          toAdd.addAll(hits);
+        }
+      }
       setState(() {
         _selectedTags
           ..clear()
-          ..addAll(suggested.where(allTags.contains));
+          ..addAll(toAdd);
         _isTagLoading = false;
       });
     } catch (_) {
@@ -187,6 +201,13 @@ class _InputScreenState extends State<InputScreen> {
       );
       return;
     }
+    final whoTags = _kTagGroups['누구와']!.toSet();
+    if (!_selectedTags.any(whoTags.contains)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('"누구와" 항목을 선택해주세요.')),
+      );
+      return;
+    }
     if (_isSpot && _textController.text.trim().isEmpty && _selectedTags.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('장소를 입력하거나 태그를 선택해주세요.')),
@@ -209,6 +230,7 @@ class _InputScreenState extends State<InputScreen> {
         res = await ApiService.getSpotRecommendation(
           userText: _textController.text.trim(),
           transport: _transport,
+          region: _region,
           userLat: _effectiveLat!,
           userLng: _effectiveLng!,
           personaTags: tags,
@@ -217,6 +239,7 @@ class _InputScreenState extends State<InputScreen> {
       } else {
         res = await ApiService.getCourseRecommendation(
           transport: _transport,
+          region: _region,
           userLat: _effectiveLat!,
           userLng: _effectiveLng!,
           personaTags: tags,
@@ -240,6 +263,7 @@ class _InputScreenState extends State<InputScreen> {
         Navigator.push(context, MaterialPageRoute(
           builder: (_) => SpotResultScreen(
             places: List<Map<String, dynamic>>.from(data['places']),
+            requestedCount: _resultCount,
           ),
         ));
       } else {
@@ -249,6 +273,7 @@ class _InputScreenState extends State<InputScreen> {
               (data['courses'] as List)
                   .map((c) => List<Map<String, dynamic>>.from(c)),
             ),
+            requestedCount: _resultCount,
           ),
         ));
       }
@@ -297,7 +322,7 @@ class _InputScreenState extends State<InputScreen> {
               _sectionLabel('이동 수단'),
               const SizedBox(height: 10),
               _ChoiceRow(
-                options: const ['대중교통/도보', '차'],
+                options: const ['대중교통', '차'],
                 selected: _transport,
                 themeColor: _themeColor,
                 onSelect: (t) => setState(() {
@@ -443,19 +468,33 @@ class _InputScreenState extends State<InputScreen> {
               const SizedBox(height: 12),
 
               // ── 6. 페르소나 태그 ──────────────────────────────
-              ..._kTagGroups.entries.map((entry) => _TagSection(
-                    title: entry.key,
-                    tags: entry.value,
-                    selectedTags: _selectedTags,
-                    themeColor: _themeColor,
-                    onToggle: (tag) => setState(() {
-                      if (_selectedTags.contains(tag)) {
-                        _selectedTags.remove(tag);
-                      } else {
-                        _selectedTags.add(tag);
-                      }
-                    }),
-                  )),
+              ..._kTagGroups.entries.map((entry) {
+                    final isSingle = _kSingleSelectGroups.contains(entry.key);
+                    final hint = entry.key == '누구와'
+                        ? '필수 선택'
+                        : entry.key == '어떤 분위기'
+                            ? '복수 선택 가능'
+                            : null;
+                    return _TagSection(
+                      title: entry.key,
+                      tags: entry.value,
+                      selectedTags: _selectedTags,
+                      themeColor: _themeColor,
+                      singleSelect: isSingle,
+                      hint: hint,
+                      hiddenTags: const {},
+                      onToggle: (tag) => setState(() {
+                        if (_selectedTags.contains(tag)) {
+                          _selectedTags.remove(tag);
+                        } else {
+                          if (isSingle) {
+                            _selectedTags.removeAll(entry.value);
+                          }
+                          _selectedTags.add(tag);
+                        }
+                      }),
+                    );
+                  }),
 
               const SizedBox(height: 20),
 
@@ -585,6 +624,9 @@ class _TagSection extends StatelessWidget {
   final List<String> tags;
   final Set<String> selectedTags;
   final Color themeColor;
+  final Set<String> hiddenTags;
+  final bool singleSelect;
+  final String? hint;
   final void Function(String) onToggle;
 
   const _TagSection({
@@ -593,6 +635,9 @@ class _TagSection extends StatelessWidget {
     required this.selectedTags,
     required this.themeColor,
     required this.onToggle,
+    this.hiddenTags = const {},
+    this.singleSelect = false,
+    this.hint,
   });
 
   @override
@@ -602,19 +647,33 @@ class _TagSection extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            title,
-            style: const TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-              color: Color(0xFF555555),
-            ),
+          Row(
+            children: [
+              Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF555555),
+                ),
+              ),
+              if (hint != null) ...[
+                const SizedBox(width: 6),
+                Text(
+                  hint!,
+                  style: const TextStyle(
+                    fontSize: 11,
+                    color: Color(0xFFFF7043),
+                  ),
+                ),
+              ],
+            ],
           ),
           const SizedBox(height: 8),
           Wrap(
             spacing: 8,
             runSpacing: 8,
-            children: tags.map((tag) {
+            children: tags.where((tag) => !hiddenTags.contains(tag)).map((tag) {
               final selected = selectedTags.contains(tag);
               return GestureDetector(
                 onTap: () => onToggle(tag),

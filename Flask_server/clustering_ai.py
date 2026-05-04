@@ -37,7 +37,7 @@ def find_optimal_clusters(coords, max_k):
     print(f"[군집화 모듈] 최적 군집 수 선택: k={best_k} (Score: {best_score:.4f})")
     return best_k
 
-def perform_clustering(df, transport='대중교통/도보'):
+def perform_clustering(df, transport='대중교통'):
     total_places = len(df)
 
     if total_places < 5:
@@ -46,7 +46,7 @@ def perform_clustering(df, transport='대중교통/도보'):
 
     # 탐색할 최대 군집 수: 데이터 수의 제곱근 (경험적 상한선)
     # 이동수단에 따라 탐색 범위를 조정 (승용차는 더 넓은 범위 허용)
-    if transport == '대중교통/도보':
+    if transport == '대중교통':
         max_k = max(2, int(total_places ** 0.5) // 2)
     else:
         max_k = max(2, int(total_places ** 0.5))
@@ -77,4 +77,4 @@ if __name__ == "__main__":
 
     if os.path.exists('chungnam_places_filtered.csv'):
         sample_df = pd.read_csv('chungnam_places_filtered.csv')
-        clustered_df = perform_clustering(sample_df, transport='대중교통/도보')
+        clustered_df = perform_clustering(sample_df, transport='대중교통')

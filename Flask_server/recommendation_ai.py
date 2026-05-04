@@ -29,7 +29,7 @@ def add_scores(df: pd.DataFrame, blog_tag_keywords: list) -> pd.DataFrame:
     else:
         df['tag_score'] = 0.0
 
-    df['score'] = 0.4 * df['pop_score'] + 0.6 * df['tag_score']
+    df['score'] = 0.15 * df['pop_score'] + 0.85 * df['tag_score']
     return df
 
 
