@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'travel_input_screen.dart';
+import 'input_screen.dart';
 
 void main() {
   runApp(const MyApp());
@@ -11,53 +11,132 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: '충남 여행 AI',
+      title: '즉흥 여행',
+      debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        // 앱의 메인 색상
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
+        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFFFF7043)),
         useMaterial3: true,
       ),
-      // 앱을 켰을 때 처음 보여줄 화면
       home: const HomeScreen(),
     );
   }
 }
 
-// 홈 화면
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      // 1. 상단 바 (AppBar)
-      appBar: AppBar(
-        title: const Text('AI 충남 여행 플래너'),
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+      backgroundColor: const Color(0xFFFFF8F3),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const SizedBox(height: 32),
+              const Text(
+                '지금 어디\n가볼까요?',
+                style: TextStyle(
+                  fontSize: 34,
+                  fontWeight: FontWeight.bold,
+                  height: 1.3,
+                  color: Color(0xFF1A1A1A),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '충남 천안 · 아산',
+                style: TextStyle(fontSize: 16, color: Colors.grey.shade500),
+              ),
+              const SizedBox(height: 56),
+              _ModeCard(
+                title: '지금 당장 뭘 할지',
+                subtitle: '밥집, 카페, 산책 등\n한 가지 장소 즉시 탐색',
+                icon: Icons.bolt_rounded,
+                color: const Color(0xFFFF7043),
+                mode: 'spot',
+              ),
+              const SizedBox(height: 16),
+              _ModeCard(
+                title: '오늘 하루 뭘 할지',
+                subtitle: '다양한 카테고리로 구성된\n3-stop 당일 코스 추천',
+                icon: Icons.route_rounded,
+                color: const Color(0xFF26C6DA),
+                mode: 'course',
+              ),
+            ],
+          ),
+        ),
       ),
-      // 2. 몸통 (Body)
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+    );
+  }
+}
+
+class _ModeCard extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final IconData icon;
+  final Color color;
+  final String mode;
+
+  const _ModeCard({
+    required this.title,
+    required this.subtitle,
+    required this.icon,
+    required this.color,
+    required this.mode,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => InputScreen(mode: mode)),
+      ),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(
+          color: color,
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [
+            BoxShadow(
+              color: color.withValues(alpha: 0.35),
+              blurRadius: 16,
+              offset: const Offset(0, 6),
+            ),
+          ],
+        ),
+        child: Row(
           children: [
-            const Text(
-              '어떤 여행을 떠나고 싶으신가요?',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 20), // 여백
-            // 버튼 예시
-            ElevatedButton(
-              onPressed: () {
-                // 화면 이동 코드 (네비게이션)
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => const TravelInputScreen(),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
                   ),
-                );
-              },
-              child: const Text('여행 코스 추천받기'),
+                  const SizedBox(height: 8),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: Colors.white.withValues(alpha: 0.85),
+                      height: 1.5,
+                    ),
+                  ),
+                ],
+              ),
             ),
+            Icon(icon, size: 52, color: Colors.white.withValues(alpha: 0.85)),
           ],
         ),
       ),
