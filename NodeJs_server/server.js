@@ -28,10 +28,13 @@ async function forwardToFlask(req, res, path) {
     }
 }
 
+// 텍스트 → 페르소나 태그 자동 제안
+app.post('/suggest/tags', (req, res) => forwardToFlask(req, res, '/suggest/tags'));
+
 // 지금 당장 뭘 할지 — 단일 장소 즉시 추천 (상위 5곳)
 app.post('/recommend/spot', (req, res) => forwardToFlask(req, res, '/recommend/spot'));
 
-// 오늘 뭘 할지 — 3-stop 당일 코스 추천
+// 오늘 뭘 할지 — 5-stop 당일 코스 추천 (3가지 옵션)
 app.post('/recommend/course', (req, res) => forwardToFlask(req, res, '/recommend/course'));
 
 const PORT = 8080;

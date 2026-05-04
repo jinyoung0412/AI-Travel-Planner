@@ -1,12 +1,12 @@
-import os, json, math, logging
+import os, json, logging
 import anthropic
 import pandas as pd
 from flask import Flask, request, jsonify
 from geopy.distance import geodesic
 from dotenv import load_dotenv
 
+from recommendation_ai import add_scores, greedy_tsp, generate_fixed_courses
 from clustering_ai import perform_clustering
-from recommendation_ai import add_scores, greedy_tsp, select_course
 
 load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
 
@@ -28,27 +28,76 @@ log.info(f"데이터 로드 완료: {len(df_all)}개 장소")
 _claude = anthropic.Anthropic(api_key=os.environ['ANTHROPIC_API_KEY'])
 MODEL   = 'claude-haiku-4-5-20251001'
 
-SPOT_SYSTEM = """\
-사용자 입력을 분석해 장소 검색 키워드를 JSON으로 반환하세요.
+# spot 모드: 텍스트에서 장소 종류(카테고리)만 추출
+SPOT_CATEGORY_SYSTEM = """\
+사용자 입력에서 찾고 싶은 장소 종류만 JSON으로 반환하세요.
 
-category_filters: 카카오맵 카테고리·검색어에 포함될 단어 (예: 육류, 고기, 카페, 공원, 술집, 호프, 이자카야)
-blog_tag_keywords: 사회적 맥락·분위기 키워드 (예: 부모님, 가족, 데이트, 연인, 회식, 혼자, 아이)
-
-JSON만 반환. 다른 텍스트 금지.
-형식: {"category_filters": [...], "blog_tag_keywords": [...]}"""
-
-COURSE_SYSTEM = """\
-사용자 입력을 분석해 하루 코스 3곳을 설계하고 JSON으로 반환하세요.
-각 stop은 서로 다른 카테고리여야 합니다 (음식점 + 카페 + 자연/문화 등).
+[category_filters 규칙]
+- 사용자가 명시한 장소 종류만 포함. 상위/유사 카테고리 추가 금지.
+- 예) "닭갈비" → ["닭갈비"]  ← "고기", "한식" 추가 금지
+- 예) "카페" → ["카페"]  ← "음식점", "디저트" 추가 금지
+- 장소를 명시하지 않은 경우 빈 배열 []
 
 JSON만 반환. 다른 텍스트 금지.
-형식: {"stops": [{"category_filters": [...], "blog_tag_keywords": [...]}, ...]}"""
+형식: {"category_filters": [...]}"""
+
+# 텍스트 → 어울리는 페르소나 태그 자동 제안 (UI 자동 선택용)
+TAG_SUGGEST_SYSTEM = """\
+사용자 입력을 보고 어울리는 태그를 아래 목록에서 선택해 JSON으로 반환하세요.
+반드시 아래 목록에 있는 태그 문자열 그대로만 사용하세요.
+
+[누구와]
+혼자, 친구와, 연인과, 부부끼리, 가족 나들이, 부모님 모시고, 아이와 함께, 유아/영아 동반,
+단체/모임, 동아리/클럽, 회식, 소개팅/첫만남
+
+[어떤 분위기]
+힐링/여유, 활동적인, 감성적인, 로맨틱한, 조용한, 트렌디한, 고급스러운, 아늑한,
+이색적인, 자연 친화적, 소소한 일상, 설레는
+
+[특별한 날]
+기념일, 생일, 졸업·입학 기념, 프로포즈, 첫 데이트, 오랜만에 만남, 일상 탈출
+
+[실내·야외]
+실내 위주, 야외 위주
+
+[어떤 활동]
+맛집 탐방, 카페 투어, 문화·역사 탐방, 박물관/전시, 쇼핑, 자연/산책, 등산/트레킹,
+드라이브, 사진 명소, 야경/저녁, 스포츠/레저, 체험 공방, 전통/한옥, 공원 나들이, 노래방/실내 오락
+
+[기타]
+어르신 동반, 반려동물 동반, 가성비, 아이 친화적, 넓은 공간
+
+관련 있는 태그만 선택. 목록 밖 단어 절대 금지.
+JSON만 반환. 형식: {"tags": [...]}"""
+
+# 선택된 페르소나 태그 → 블로그 검색 키워드 확장
+TAG_BLOG_SYSTEM = """\
+사용자가 선택한 여행 태그를 네이버 블로그 검색에 쓸 실제 키워드로 확장해 JSON으로 반환하세요.
+
+[규칙]
+- 태그의 의미를 블로그에 실제 쓰이는 짧은 단어로 확장. 중복 제거.
+- 여러 태그가 비슷한 키워드를 공유하면 합쳐서 반환.
+- 예) "연인과", "로맨틱한", "첫 데이트", "프로포즈" → ["연인", "데이트", "커플", "로맨틱"]
+- 예) "부모님 모시고" → ["부모님", "효도"]
+- 예) "아이와 함께", "유아/영아 동반", "아이 친화적" → ["아이", "키즈", "어린이", "유아"]
+- 예) "힐링/여유", "조용한", "자연 친화적" → ["힐링", "여유", "자연", "힐링여행"]
+- 예) "회식", "단체/모임", "동아리/클럽" → ["회식", "단체", "모임"]
+- 예) "감성적인", "사진 명소", "트렌디한" → ["감성", "인스타", "포토스팟", "핫플"]
+- 예) "고급스러운" → ["고급", "파인다이닝", "럭셔리"]
+- 예) "전통/한옥", "문화·역사 탐방" → ["전통", "한옥", "역사", "문화재"]
+- 예) "등산/트레킹", "스포츠/레저" → ["등산", "트레킹", "레저", "액티비티"]
+- 예) "야경/저녁" → ["야경", "저녁", "밤"]
+- 예) "소개팅/첫만남" → ["소개팅", "첫만남", "데이트"]
+- 예) "졸업·입학 기념", "기념일", "생일" → ["기념일", "생일", "축하", "특별한날"]
+- 태그가 없으면 빈 배열
+
+JSON만 반환. 형식: {"blog_tag_keywords": [...]}"""
 
 
-def _call_claude(system: str, user_msg: str) -> dict:
+def _call_claude(system: str, user_msg: str, max_tokens: int = 512) -> dict:
     resp = _claude.messages.create(
         model=MODEL,
-        max_tokens=512,
+        max_tokens=max_tokens,
         system=system,
         messages=[{"role": "user", "content": user_msg}],
     )
@@ -60,16 +109,21 @@ def _call_claude(system: str, user_msg: str) -> dict:
     return json.loads(text.strip())
 
 
-def extract_spot_keywords(user_text: str) -> dict:
-    return _call_claude(SPOT_SYSTEM, f'입력: "{user_text}"')
+def extract_spot_category(user_text: str) -> list:
+    result = _call_claude(SPOT_CATEGORY_SYSTEM, f'입력: "{user_text}"')
+    return result.get('category_filters', [])
 
 
-def extract_course_plan(user_text: str) -> dict:
-    return _call_claude(COURSE_SYSTEM, f'입력: "{user_text}"')
+def expand_persona_tags(persona_tags: list) -> list:
+    if not persona_tags:
+        return []
+    tags_str = ', '.join(f'"{t}"' for t in persona_tags)
+    result = _call_claude(TAG_BLOG_SYSTEM, f'선택된 태그: [{tags_str}]')
+    return result.get('blog_tag_keywords', [])
 
 
 # ── 반경 필터 ─────────────────────────────────────────────────
-RADIUS_KM = {'차': 15.0, '대중교통': 5.0}
+RADIUS_KM = {'차': 15.0, '대중교통/도보': 5.0}
 
 
 def filter_radius(df: pd.DataFrame, lat: float, lng: float, transport: str) -> pd.DataFrame:
@@ -93,7 +147,6 @@ def _tag_has_any(tags_json, keywords: list) -> bool:
 
 
 def filter_keywords(df: pd.DataFrame, category_filters: list, blog_tag_keywords: list) -> pd.DataFrame:
-    # 카테고리 필터 (카테고리 + search_category 둘 다 검색)
     if category_filters:
         pat = '|'.join(category_filters)
         cat_mask = (
@@ -103,58 +156,15 @@ def filter_keywords(df: pd.DataFrame, category_filters: list, blog_tag_keywords:
     else:
         cat_mask = pd.Series(True, index=df.index)
 
-    # 블로그 태그 키워드 필터
     if blog_tag_keywords:
         tag_mask = df['blog_tags'].apply(lambda x: _tag_has_any(x, blog_tag_keywords))
     else:
         tag_mask = pd.Series(True, index=df.index)
 
     result = df[cat_mask & tag_mask]
-    # 결과 부족 시 블로그 태그 조건 완화
     if len(result) < 3 and blog_tag_keywords:
         result = df[cat_mask]
     return result.copy()
-
-
-# ── 스코어링 ──────────────────────────────────────────────────
-def add_scores(df: pd.DataFrame, blog_tag_keywords: list) -> pd.DataFrame:
-    df = df.copy()
-
-    # 인기도 정규화: log(방문자수 + 블로그수×0.3 + 1)
-    raw = (df['방문자수'].fillna(0) + df['블로그수'].fillna(0) * 0.3 + 1).apply(math.log)
-    mn, mx = raw.min(), raw.max()
-    df['pop_score'] = ((raw - mn) / (mx - mn)).clip(0, 1) if mx > mn else 0.0
-
-    # 블로그 태그 매칭 점수
-    if blog_tag_keywords:
-        def _match(tags_json):
-            if pd.isna(tags_json):
-                return 0.0
-            try:
-                keys = ' '.join(json.loads(tags_json).keys())
-                return sum(1 for kw in blog_tag_keywords if kw in keys) / len(blog_tag_keywords)
-            except Exception:
-                return 0.0
-        df['tag_score'] = df['blog_tags'].apply(_match)
-    else:
-        df['tag_score'] = 0.0
-
-    df['score'] = 0.4 * df['pop_score'] + 0.6 * df['tag_score']
-    return df
-
-
-# ── Greedy TSP ────────────────────────────────────────────────
-def greedy_tsp(records: list, start: tuple) -> list:
-    route, current, remaining = [], start, list(records)
-    while remaining:
-        nearest = min(
-            remaining,
-            key=lambda p: geodesic(current, (p['latitude'], p['longitude'])).kilometers,
-        )
-        route.append(nearest)
-        remaining.remove(nearest)
-        current = (nearest['latitude'], nearest['longitude'])
-    return route
 
 
 # ── 응답 포맷 ─────────────────────────────────────────────────
@@ -170,23 +180,44 @@ def _fmt(record: dict) -> dict:
 
 
 # ─────────────────────────────────────────────────────────────
+# POST /suggest/tags — 텍스트 → 페르소나 태그 자동 제안
+# ─────────────────────────────────────────────────────────────
+@app.route('/suggest/tags', methods=['POST'])
+def suggest_tags():
+    try:
+        data      = request.get_json()
+        user_text = data.get('user_text', '').strip()
+        if not user_text:
+            return jsonify({'tags': []}), 200
+        result = _call_claude(TAG_SUGGEST_SYSTEM, f'입력: "{user_text}"')
+        return jsonify({'tags': result.get('tags', [])}), 200
+    except Exception:
+        log.exception('[tags] 오류')
+        return jsonify({'tags': []}), 200  # 실패해도 빈 태그로 무시
+
+
+# ─────────────────────────────────────────────────────────────
 # POST /recommend/spot — 지금 당장 뭘 할지 (상위 5곳)
 # ─────────────────────────────────────────────────────────────
 @app.route('/recommend/spot', methods=['POST'])
 def recommend_spot():
     try:
-        data      = request.get_json()
-        user_text = data['user_text']
-        transport = data.get('transport', '대중교통')
-        user_lat  = float(data['user_lat'])
-        user_lng  = float(data['user_lng'])
+        data         = request.get_json()
+        user_text    = data.get('user_text', '')
+        transport    = data.get('transport', '대중교통')
+        user_lat     = float(data['user_lat'])
+        user_lng     = float(data['user_lng'])
+        persona_tags = data.get('persona_tags', [])
+        count        = max(1, min(int(data.get('count', 5)), 20))
 
-        log.info(f"[spot] {user_text}")
+        log.info(f"[spot] text={user_text!r} | tags={persona_tags} | count={count}")
 
-        kw    = extract_spot_keywords(user_text)
-        cat_f = kw.get('category_filters', [])
-        tag_f = kw.get('blog_tag_keywords', [])
-        log.info(f"[spot] cat={cat_f} | tag={tag_f}")
+        # Claude 호출 #1: 텍스트 → 카테고리 필터
+        cat_f = extract_spot_category(user_text) if user_text else []
+        # Claude 호출 #2: 선택 페르소나 태그 → 블로그 검색 키워드
+        tag_f = expand_persona_tags(persona_tags)
+
+        log.info(f"[spot] cat={cat_f} | blog_kw={tag_f}")
 
         df = filter_radius(df_all, user_lat, user_lng, transport)
         df = filter_keywords(df, cat_f, tag_f)
@@ -195,52 +226,49 @@ def recommend_spot():
         if df.empty:
             return jsonify({'error': '조건에 맞는 장소가 없습니다.'}), 404
 
-        top5  = df.nlargest(5, 'score').to_dict('records')
-        route = greedy_tsp(top5, (user_lat, user_lng))
+        top_n = df.nlargest(count, 'score').to_dict('records')
+        route = greedy_tsp(top_n, (user_lat, user_lng))
 
         return jsonify({'places': [_fmt(p) for p in route]}), 200
 
     except Exception as e:
-        log.exception(f"[spot] 오류")
+        log.exception('[spot] 오류')
         return jsonify({'error': str(e)}), 500
 
 
 # ─────────────────────────────────────────────────────────────
-# POST /recommend/course — 오늘 뭘 할지 (3-stop 코스)
+# POST /recommend/course — 오늘 뭘 할지 (5-stop 코스 × 3개)
 # ─────────────────────────────────────────────────────────────
 @app.route('/recommend/course', methods=['POST'])
 def recommend_course():
     try:
-        data      = request.get_json()
-        user_text = data['user_text']
-        transport = data.get('transport', '대중교통')
-        user_lat  = float(data['user_lat'])
-        user_lng  = float(data['user_lng'])
+        data         = request.get_json()
+        transport    = data.get('transport', '대중교통')
+        user_lat     = float(data['user_lat'])
+        user_lng     = float(data['user_lng'])
+        persona_tags = data.get('persona_tags', [])
+        count        = max(1, min(int(data.get('count', 3)), 5))
 
-        log.info(f"[course] {user_text}")
+        log.info(f"[course] tags={persona_tags} | count={count}")
 
-        plan  = extract_course_plan(user_text)
-        stops = plan.get('stops', [])
-        if len(stops) != 3:
-            return jsonify({'error': f'Claude 응답 오류: stop 수={len(stops)}'}), 500
-        log.info(f"[course] 코스 설계: {stops}")
+        # Claude 호출: 선택 페르소나 태그 → 블로그 검색 키워드
+        tag_f = expand_persona_tags(persona_tags)
+        log.info(f"[course] blog_kw={tag_f}")
 
         radius_df = filter_radius(df_all, user_lat, user_lng, transport)
         if len(radius_df) < 5:
             return jsonify({'error': '반경 내 장소가 너무 적습니다.'}), 404
 
-        clustered    = perform_clustering(radius_df, transport=transport)
-        best_selected = select_course(clustered, stops, filter_keywords)
+        clustered_df = perform_clustering(radius_df, transport)
+        courses = generate_fixed_courses(clustered_df, tag_f, filter_keywords, n=count)
 
-        if not best_selected:
+        if not courses:
             return jsonify({'error': '코스를 구성할 장소가 부족합니다.'}), 404
 
-        route = greedy_tsp(best_selected, (user_lat, user_lng))
-
-        return jsonify({'course': [_fmt(p) for p in route]}), 200
+        return jsonify({'courses': [[_fmt(p) for p in course] for course in courses]}), 200
 
     except Exception as e:
-        log.exception(f"[course] 오류")
+        log.exception('[course] 오류')
         return jsonify({'error': str(e)}), 500
 
 

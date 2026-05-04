@@ -51,8 +51,8 @@ def perform_clustering(df, transport='대중교통/도보'):
     else:
         max_k = max(2, int(total_places ** 0.5))
 
-    # 군집 수가 데이터 수를 초과하지 않도록 제한
-    max_k = min(max_k, total_places - 1)
+    # 코스 구성 가능성을 위해 군집당 최소 장소 수 보장 (상한선 15)
+    max_k = min(max_k, total_places - 1, 15)
 
     print(f"[군집화 모듈] 데이터 {total_places}개 대상, 이동수단 '{transport}' 고려하여 최적 군집 수 탐색 (최대 k={max_k})")
 

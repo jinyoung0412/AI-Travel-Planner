@@ -2,45 +2,63 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 class ApiService {
-  // ngrok 사용 시: static const String baseUrl = 'https://[생성된주소].ngrok.app';
-  // 공인 IP 사용 시: static const String baseUrl = 'http://[집의_공인_IP]:8080';
-  //static const String baseUrl = 'https://nonschematized-pseudofeverish-ka.ngrok-free.dev';
   static const String baseUrl = 'http://10.0.2.2:8080';
-  static Future<Map<String, dynamic>?> getRecommendation({
+
+  static Future<List<String>> suggestTags({required String userText}) async {
+    final result = await _post('/suggest/tags', {'user_text': userText});
+    if (result == null) return [];
+    final tags = result['tags'] ?? result['data']?['tags'];
+    if (tags is List) return List<String>.from(tags);
+    return [];
+  }
+
+  static Future<Map<String, dynamic>?> getSpotRecommendation({
+    required String userText,
     required String transport,
-    required int personCount,
-    required String region,
-    required String duration,
-    required int days,
-    required List<String> themes,
-    double? userLat,
-    double? userLng,
+    required double userLat,
+    required double userLng,
+    required List<String> personaTags,
+    required int count,
   }) async {
+    return _post('/recommend/spot', {
+      'user_text': userText,
+      'transport': transport,
+      'user_lat': userLat,
+      'user_lng': userLng,
+      'persona_tags': personaTags,
+      'count': count,
+    });
+  }
+
+  static Future<Map<String, dynamic>?> getCourseRecommendation({
+    required String transport,
+    required double userLat,
+    required double userLng,
+    required List<String> personaTags,
+    required int count,
+  }) async {
+    return _post('/recommend/course', {
+      'transport': transport,
+      'user_lat': userLat,
+      'user_lng': userLng,
+      'persona_tags': personaTags,
+      'count': count,
+    });
+  }
+
+  static Future<Map<String, dynamic>?> _post(String path, Map<String, dynamic> body) async {
     try {
       final response = await http.post(
-        Uri.parse('$baseUrl/ai-predict'),
+        Uri.parse('$baseUrl$path'),
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'transport': transport,
-          'personCount': personCount,
-          'region': region,
-          'duration': duration,
-          'days': days,
-          'themes': themes,
-          if (userLat != null) 'userLat': userLat,
-          if (userLng != null) 'userLng': userLng,
-        }),
+        body: jsonEncode(body),
       );
-
       if (response.statusCode == 200) {
         return jsonDecode(utf8.decode(response.bodyBytes));
-      } else {
-        print('서버 에러 발생: 상태 코드 ${response.statusCode}');
-        return null;
       }
+      return {'error': '서버 오류 (${response.statusCode})'};
     } catch (e) {
-      print('네트워크 에러 발생: $e');
-      return null;
+      return {'error': '네트워크 오류: $e'};
     }
   }
 }
