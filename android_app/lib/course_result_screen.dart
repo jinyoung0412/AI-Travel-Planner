@@ -3,8 +3,9 @@ import 'package:url_launcher/url_launcher.dart';
 
 class CourseResultScreen extends StatefulWidget {
   final List<List<dynamic>> courses;
+  final int requestedCount;
 
-  const CourseResultScreen({super.key, required this.courses});
+  const CourseResultScreen({super.key, required this.courses, required this.requestedCount});
 
   @override
   State<CourseResultScreen> createState() => _CourseResultScreenState();
@@ -86,6 +87,30 @@ class _CourseResultScreenState extends State<CourseResultScreen> {
               style: TextStyle(fontSize: 13, color: Colors.grey.shade500),
             ),
           ),
+          if (widget.courses.length < widget.requestedCount)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFF3E0),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFFFFCC80)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.info_outline, size: 16, color: Color(0xFFFF8F00)),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        '선택하신 조건에 맞는 코스가 부족해 ${widget.courses.length}개만 추천되었어요.',
+                        style: const TextStyle(fontSize: 13, color: Color(0xFF795548)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           // 코스 PageView
           Expanded(
             child: PageView.builder(

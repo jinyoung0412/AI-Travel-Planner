@@ -1,4 +1,4 @@
-import os, json, logging
+import os, json, logging, sqlite3
 import anthropic
 import pandas as pd
 from flask import Flask, request, jsonify
@@ -14,15 +14,20 @@ app = Flask(__name__)
 logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
 log = logging.getLogger(__name__)
 
-# ── 데이터 로드 ───────────────────────────────────────────────
-_ROOT         = os.path.join(os.path.dirname(__file__), '..')
-PLACES_CSV    = os.path.join(_ROOT, 'Preprocess', 'data', 'processed', 'chungnam_places_filtered.csv')
-BLOG_TAGS_CSV = os.path.join(_ROOT, 'Preprocess', 'data', 'processed', 'blog_tags.csv')
+# ── 데이터베이스 ──────────────────────────────────────────────
+DB_PATH = os.path.join(os.path.dirname(__file__), 'places.db')
 
-_places    = pd.read_csv(PLACES_CSV, encoding='utf-8-sig')
-_blog_tags = pd.read_csv(BLOG_TAGS_CSV, encoding='utf-8-sig')[['가게명', 'blog_tags']]
-df_all     = _places.merge(_blog_tags, on='가게명', how='left')
-log.info(f"데이터 로드 완료: {len(df_all)}개 장소")
+
+def get_df(region: str = '') -> pd.DataFrame:
+    """SQLite에서 장소 데이터 조회. 지역 지정 시 해당 지역만 반환."""
+    conn = sqlite3.connect(DB_PATH)
+    if region and region != '내 주변':
+        df = pd.read_sql('SELECT * FROM places WHERE 지역 = ?', conn, params=(region,))
+    else:
+        df = pd.read_sql('SELECT * FROM places', conn)
+    conn.close()
+    log.info(f"DB 조회: 지역={region or '전체'}, {len(df)}개")
+    return df
 
 # ── Claude 클라이언트 ─────────────────────────────────────────
 _claude = anthropic.Anthropic(api_key=os.environ['ANTHROPIC_API_KEY'])
@@ -52,7 +57,7 @@ TAG_SUGGEST_SYSTEM = """\
 
 [어떤 분위기]
 힐링/여유, 활동적인, 감성적인, 로맨틱한, 조용한, 트렌디한, 고급스러운, 아늑한,
-이색적인, 자연 친화적, 소소한 일상, 설레는
+이색적인, 자연 친화적, 소소한 일상, 설레는, 멋진 야경
 
 [특별한 날]
 기념일, 생일, 졸업·입학 기념, 프로포즈, 첫 데이트, 오랜만에 만남, 일상 탈출
@@ -62,10 +67,7 @@ TAG_SUGGEST_SYSTEM = """\
 
 [어떤 활동]
 맛집 탐방, 카페 투어, 문화·역사 탐방, 박물관/전시, 쇼핑, 자연/산책, 등산/트레킹,
-드라이브, 사진 명소, 야경/저녁, 스포츠/레저, 체험 공방, 전통/한옥, 공원 나들이, 노래방/실내 오락
-
-[기타]
-어르신 동반, 반려동물 동반, 가성비, 아이 친화적, 넓은 공간
+사진 명소, 야경, 스포츠/레저, 체험 공방, 전통/한옥, 노래방/실내 오락
 
 관련 있는 태그만 선택. 목록 밖 단어 절대 금지.
 JSON만 반환. 형식: {"tags": [...]}"""
@@ -82,11 +84,13 @@ TAG_BLOG_SYSTEM = """\
 - 예) "아이와 함께", "유아/영아 동반", "아이 친화적" → ["아이", "키즈", "어린이", "유아"]
 - 예) "힐링/여유", "조용한", "자연 친화적" → ["힐링", "여유", "자연", "힐링여행"]
 - 예) "회식", "단체/모임", "동아리/클럽" → ["회식", "단체", "모임"]
-- 예) "감성적인", "사진 명소", "트렌디한" → ["감성", "인스타", "포토스팟", "핫플"]
+- 예) "감성적인", "트렌디한" → ["감성", "인스타", "핫플", "트렌디"]
+- 예) "사진 명소" → ["관광명소", "포토스팟", "인생샷", "전망", "뷰"]
 - 예) "고급스러운" → ["고급", "파인다이닝", "럭셔리"]
 - 예) "전통/한옥", "문화·역사 탐방" → ["전통", "한옥", "역사", "문화재"]
-- 예) "등산/트레킹", "스포츠/레저" → ["등산", "트레킹", "레저", "액티비티"]
-- 예) "야경/저녁" → ["야경", "저녁", "밤"]
+- 예) "등산/트레킹" → ["등산", "트레킹", "산행", "계곡"]
+- 예) "스포츠/레저" → ["스포츠", "레저", "액티비티", "수영", "클라이밍"]
+- 예) "멋진 야경" → ["야경", "야간", "밤 풍경", "야경 명소"]
 - 예) "소개팅/첫만남" → ["소개팅", "첫만남", "데이트"]
 - 예) "졸업·입학 기념", "기념일", "생일" → ["기념일", "생일", "축하", "특별한날"]
 - 태그가 없으면 빈 배열
@@ -122,8 +126,53 @@ def expand_persona_tags(persona_tags: list) -> list:
     return result.get('blog_tag_keywords', [])
 
 
+# ── 음식점·카페 카테고리 (명시 선택 없으면 제외 대상) ────────────
+_FOOD_CAFE_CATS = [
+    '한식', '중식', '일식', '양식', '고기', '닭갈비', '해산물',
+    '국밥', '음식점', '식당', '술집', '호프', '카페', '베이커리',
+    '분식', '피자', '파스타', '뷔페', '치킨', '햄버거', '패스트푸드',
+    '커피', '디저트', '아이스크림', '주스', '차(음료)', '바(Bar)',
+    '포차', '막걸리', '해물', '족발', '삼겹살', '샐러드', '도시락',
+]
+_FOOD_CAFE_TAGS = {'맛집 탐방', '카페 투어'}
+
+# ── 활동 태그 → 카테고리 필터 매핑 ──────────────────────────────
+_TAG_CATEGORY_MAP = {
+    '맛집 탐방':      ['한식', '중식', '일식', '양식', '고기', '닭갈비', '해산물', '국밥', '음식점', '식당'],
+    '카페 투어':      ['카페', '베이커리'],
+    '박물관/전시':    ['박물관', '미술관', '전시'],
+    '문화·역사 탐방': ['문화재', '유적', '기념관', '역사'],
+    '쇼핑':           ['시장', '쇼핑'],
+    '자연/산책':      ['공원', '산책로', '수목원', '산', '계곡', '호수', '자연', '생태'],
+    '등산/트레킹':    ['산', '등산', '트레킹', '계곡'],
+    '사진 명소':      [
+        '미술관', '박물관', '전시관', '전시',
+        '국가유산', '문화재', '기념관', '기념물',
+        '테마공원', '수목원', '식물원', '정원',
+        '복합문화', '광장', '도보코스', '산책로',
+        '산', '저수지', '하천', '자연공원', '생태공원',
+    ],
+    '멋진 야경':      [
+        '공원', '테마공원', '광장', '저수지', '하천',
+        '자연공원', '도보코스', '박물관', '미술관',
+    ],
+    '스포츠/레저':    ['스포츠', '레저', '수영', '볼링', '클라이밍', '체육', '경기장', '골프', '테니스'],
+    '체험 공방':      ['체험', '공방'],
+    '전통/한옥':      ['한옥', '전통', '문화재'],
+    '노래방/실내 오락': ['노래방', '볼링', '오락'],
+}
+
+
+def derive_category_from_tags(persona_tags: list) -> list:
+    """텍스트 카테고리가 없을 때 페르소나 태그에서 카테고리 힌트 추출."""
+    cats = []
+    for tag in persona_tags:
+        cats.extend(_TAG_CATEGORY_MAP.get(tag, []))
+    return list(dict.fromkeys(cats))  # 중복 제거, 순서 유지
+
+
 # ── 반경 필터 ─────────────────────────────────────────────────
-RADIUS_KM = {'차': 15.0, '대중교통/도보': 5.0}
+RADIUS_KM = {'차': 15.0, '대중교통': 5.0}
 
 
 def filter_radius(df: pd.DataFrame, lat: float, lng: float, transport: str) -> pd.DataFrame:
@@ -205,21 +254,36 @@ def recommend_spot():
         data         = request.get_json()
         user_text    = data.get('user_text', '')
         transport    = data.get('transport', '대중교통')
+        region       = data.get('region', '')
         user_lat     = float(data['user_lat'])
         user_lng     = float(data['user_lng'])
         persona_tags = data.get('persona_tags', [])
         count        = max(1, min(int(data.get('count', 5)), 20))
 
-        log.info(f"[spot] text={user_text!r} | tags={persona_tags} | count={count}")
+        log.info(f"[spot] region={region} | text={user_text!r} | tags={persona_tags} | count={count}")
 
         # Claude 호출 #1: 텍스트 → 카테고리 필터
         cat_f = extract_spot_category(user_text) if user_text else []
+        # 텍스트 카테고리 없으면 페르소나 태그에서 카테고리 힌트 추출
+        if not cat_f:
+            cat_f = derive_category_from_tags(persona_tags)
         # Claude 호출 #2: 선택 페르소나 태그 → 블로그 검색 키워드
         tag_f = expand_persona_tags(persona_tags)
 
         log.info(f"[spot] cat={cat_f} | blog_kw={tag_f}")
 
-        df = filter_radius(df_all, user_lat, user_lng, transport)
+        df = filter_radius(get_df(region), user_lat, user_lng, transport)
+
+        # 맛집/카페 태그 미선택 + 텍스트에도 음식 카테고리 없으면 → 음식점·카페 제외
+        food_cafe_selected = any(t in _FOOD_CAFE_TAGS for t in persona_tags)
+        food_in_cat_f = any(c in set(_FOOD_CAFE_CATS) for c in cat_f)
+        if not food_cafe_selected and not food_in_cat_f:
+            excl_pat = '|'.join(_FOOD_CAFE_CATS)
+            df = df[~(
+                df['카테고리'].str.contains(excl_pat, case=False, na=False) |
+                df['search_category'].str.contains(excl_pat, case=False, na=False)
+            )]
+
         df = filter_keywords(df, cat_f, tag_f)
         df = add_scores(df, tag_f)
 
@@ -244,18 +308,19 @@ def recommend_course():
     try:
         data         = request.get_json()
         transport    = data.get('transport', '대중교통')
+        region       = data.get('region', '')
         user_lat     = float(data['user_lat'])
         user_lng     = float(data['user_lng'])
         persona_tags = data.get('persona_tags', [])
         count        = max(1, min(int(data.get('count', 3)), 5))
 
-        log.info(f"[course] tags={persona_tags} | count={count}")
+        log.info(f"[course] region={region} | tags={persona_tags} | count={count}")
 
         # Claude 호출: 선택 페르소나 태그 → 블로그 검색 키워드
         tag_f = expand_persona_tags(persona_tags)
         log.info(f"[course] blog_kw={tag_f}")
 
-        radius_df = filter_radius(df_all, user_lat, user_lng, transport)
+        radius_df = filter_radius(get_df(region), user_lat, user_lng, transport)
         if len(radius_df) < 5:
             return jsonify({'error': '반경 내 장소가 너무 적습니다.'}), 404
 

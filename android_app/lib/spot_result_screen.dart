@@ -3,8 +3,9 @@ import 'package:url_launcher/url_launcher.dart';
 
 class SpotResultScreen extends StatelessWidget {
   final List<Map<String, dynamic>> places;
+  final int requestedCount;
 
-  const SpotResultScreen({super.key, required this.places});
+  const SpotResultScreen({super.key, required this.places, required this.requestedCount});
 
   Future<void> _openKakaoMap(BuildContext context, Map<String, dynamic> place) async {
     final lat = place['lat'];
@@ -38,12 +39,40 @@ class SpotResultScreen extends StatelessWidget {
       ),
       body: ListView.builder(
         padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
-        itemCount: places.length,
-        itemBuilder: (context, index) => _PlaceCard(
-          place: places[index],
-          rank: index + 1,
-          onMapTap: () => _openKakaoMap(context, places[index]),
-        ),
+        itemCount: places.length + (places.length < requestedCount ? 1 : 0),
+        itemBuilder: (context, index) {
+          if (index == 0 && places.length < requestedCount) {
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 14),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFF3E0),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFFFFCC80)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.info_outline, size: 16, color: Color(0xFFFF8F00)),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        '선택하신 조건에 맞는 장소가 부족해 ${places.length}곳만 추천되었어요.',
+                        style: const TextStyle(fontSize: 13, color: Color(0xFF795548)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }
+          final i = places.length < requestedCount ? index - 1 : index;
+          return _PlaceCard(
+            place: places[i],
+            rank: i + 1,
+            onMapTap: () => _openKakaoMap(context, places[i]),
+          );
+        },
       ),
     );
   }
