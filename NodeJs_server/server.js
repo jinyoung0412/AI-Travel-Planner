@@ -1,11 +1,7 @@
 const express = require('express');
 const axios   = require('axios');
 const cors    = require('cors');
-const jwt     = require('jsonwebtoken');
-const db      = require('./db');
 require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
-
-const JWT_SECRET = process.env.JWT_SECRET;
 
 const app = express();
 app.use(express.json());
@@ -32,112 +28,6 @@ async function forwardToFlask(req, res, path) {
         }
     }
 }
-
-// ── JWT 인증 미들웨어 ─────────────────────────────────────────
-function authMiddleware(req, res, next) {
-    const header = req.headers.authorization;
-    if (!header || !header.startsWith('Bearer ')) {
-        return res.status(401).json({ error: '인증이 필요합니다.' });
-    }
-    try {
-        req.user = jwt.verify(header.slice(7), JWT_SECRET);
-        next();
-    } catch {
-        res.status(401).json({ error: '유효하지 않은 토큰입니다.' });
-    }
-}
-
-// ── 카카오 로그인 ─────────────────────────────────────────────
-app.post('/auth/kakao', async (req, res) => {
-    const { access_token } = req.body;
-    if (!access_token) return res.status(400).json({ error: 'access_token 필요' });
-
-    try {
-        const { data } = await axios.get('https://kapi.kakao.com/v2/user/me', {
-            headers: { Authorization: `Bearer ${access_token}` },
-        });
-
-        const kakaoId   = String(data.id);
-        const nickname  = data.kakao_account?.profile?.nickname ?? null;
-        const profileImg = data.kakao_account?.profile?.profile_image_url ?? null;
-
-        const existing = db.prepare('SELECT * FROM users WHERE kakao_id = ?').get(kakaoId);
-        let userId;
-        if (existing) {
-            db.prepare('UPDATE users SET nickname = ?, profile_img = ? WHERE kakao_id = ?')
-              .run(nickname, profileImg, kakaoId);
-            userId = existing.id;
-        } else {
-            const result = db.prepare(
-                'INSERT INTO users (kakao_id, nickname, profile_img) VALUES (?, ?, ?)'
-            ).run(kakaoId, nickname, profileImg);
-            userId = result.lastInsertRowid;
-        }
-
-        const token = jwt.sign({ userId, nickname, profileImg }, JWT_SECRET, { expiresIn: '30d' });
-        console.log(`[auth] 로그인: ${nickname} (id=${userId})`);
-        res.json({ token, nickname, profile_img: profileImg });
-    } catch (e) {
-        console.error('[auth] 카카오 로그인 오류:', e.message);
-        res.status(500).json({ error: e.message });
-    }
-});
-
-// ── 저장 — 스팟 ───────────────────────────────────────────────
-app.get('/saves/spots', authMiddleware, (req, res) => {
-    const spots = db.prepare('SELECT * FROM saved_spots WHERE user_id = ? ORDER BY saved_at DESC')
-                    .all(req.user.userId);
-    res.json(spots);
-});
-
-app.post('/saves/spots', authMiddleware, (req, res) => {
-    const { name, lat, lng, category, kakao_url } = req.body;
-    if (!name) return res.status(400).json({ error: 'name 필요' });
-    const result = db.prepare(
-        'INSERT INTO saved_spots (user_id, name, lat, lng, category, kakao_url) VALUES (?, ?, ?, ?, ?, ?)'
-    ).run(req.user.userId, name, lat, lng, category, kakao_url);
-    res.json({ id: result.lastInsertRowid });
-});
-
-app.delete('/saves/spots/:id', authMiddleware, (req, res) => {
-    db.prepare('DELETE FROM saved_spots WHERE id = ? AND user_id = ?')
-      .run(req.params.id, req.user.userId);
-    res.json({ ok: true });
-});
-
-// ── 저장 — 코스 ───────────────────────────────────────────────
-app.get('/saves/courses', authMiddleware, (req, res) => {
-    const courses = db.prepare('SELECT * FROM saved_courses WHERE user_id = ? ORDER BY created_at DESC')
-                      .all(req.user.userId);
-    const result = courses.map(c => ({
-        ...c,
-        spots: db.prepare('SELECT * FROM saved_course_spots WHERE course_id = ? ORDER BY spot_order')
-                  .all(c.id),
-    }));
-    res.json(result);
-});
-
-app.post('/saves/courses', authMiddleware, (req, res) => {
-    const { region, spots } = req.body;
-    if (!spots?.length) return res.status(400).json({ error: 'spots 필요' });
-
-    const course = db.prepare('INSERT INTO saved_courses (user_id, region) VALUES (?, ?)')
-                     .run(req.user.userId, region);
-    const courseId = course.lastInsertRowid;
-
-    const insertSpot = db.prepare(
-        'INSERT INTO saved_course_spots (course_id, spot_order, name, lat, lng, category, kakao_url) VALUES (?, ?, ?, ?, ?, ?, ?)'
-    );
-    spots.forEach((s, i) => insertSpot.run(courseId, i, s.name, s.lat, s.lng, s.category, s.kakao_url));
-
-    res.json({ id: courseId });
-});
-
-app.delete('/saves/courses/:id', authMiddleware, (req, res) => {
-    db.prepare('DELETE FROM saved_courses WHERE id = ? AND user_id = ?')
-      .run(req.params.id, req.user.userId);
-    res.json({ ok: true });
-});
 
 // 텍스트 → 페르소나 태그 자동 제안
 app.post('/suggest/tags', (req, res) => forwardToFlask(req, res, '/suggest/tags'));

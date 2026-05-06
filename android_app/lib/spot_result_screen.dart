@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:provider/provider.dart';
 import 'api_service.dart';
-import 'auth_service.dart';
+import 'local_storage_service.dart';
 
 class SpotResultScreen extends StatelessWidget {
   final List<Map<String, dynamic>> places;
@@ -71,31 +70,39 @@ class _PlaceCardState extends State<_PlaceCard> {
   bool _isLoading = false;
   bool _saved = false;
 
-  Future<void> _saveSpot() async {
-    final token = context.read<AuthService>().token;
-    if (token == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('로그인 후 저장할 수 있어요.')),
-      );
-      return;
-    }
+  @override
+  void initState() {
+    super.initState();
+    _checkSaved();
+  }
+
+  Future<void> _checkSaved() async {
+    final saved = await LocalStorageService.isSpotSaved(widget.place['name'] ?? '');
+    if (mounted) setState(() => _saved = saved);
+  }
+
+  Future<void> _toggleSave() async {
     final p = widget.place;
-    final ok = await ApiService.saveSpot(token, {
-      'name': p['name'] ?? '',
-      'lat': p['lat'],
-      'lng': p['lng'],
-      'category': p['category'] ?? '',
-      'kakao_url': p['kakao_url'],
-    });
-    if (!mounted) return;
-    if (ok) {
-      setState(() => _saved = true);
+    final name = p['name'] ?? '';
+    if (_saved) {
+      await LocalStorageService.deleteSpot(name);
+      if (!mounted) return;
+      setState(() => _saved = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('저장됐어요.')),
+        const SnackBar(content: Text('저장이 취소됐어요.')),
       );
     } else {
+      await LocalStorageService.saveSpot({
+        'name': name,
+        'lat': p['lat'],
+        'lng': p['lng'],
+        'category': p['category'] ?? '',
+        'kakao_url': p['kakao_url'],
+      });
+      if (!mounted) return;
+      setState(() => _saved = true);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('저장에 실패했어요.')),
+        const SnackBar(content: Text('스팟을 저장했어요.')),
       );
     }
   }
@@ -194,7 +201,7 @@ class _PlaceCardState extends State<_PlaceCard> {
                           style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                     ),
                     GestureDetector(
-                      onTap: _saved ? null : _saveSpot,
+                      onTap: _toggleSave,
                       child: Icon(
                         _saved ? Icons.bookmark_rounded : Icons.bookmark_outline_rounded,
                         size: 22,
