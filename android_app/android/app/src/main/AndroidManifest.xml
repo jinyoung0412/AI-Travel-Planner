@@ -4,10 +4,9 @@
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <queries>
         <package android:name="net.daum.android.map" />
-        <package android:name="com.kakao.talk" />
     </queries>
     <application
-        android:label="ai_travel_app"
+        android:label="오늘 충남"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
@@ -30,17 +29,6 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
-            </intent-filter>
-        </activity>
-        <!-- 카카오 로그인 리다이렉트 Activity -->
-        <activity
-            android:name="com.kakao.sdk.auth.AuthCodeHandlerActivity"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="kakaob5d634b3a91dd5db5059c1b96c2a000e" android:host="oauth"/>
             </intent-filter>
         </activity>
         <!-- Don't delete the meta-data below.

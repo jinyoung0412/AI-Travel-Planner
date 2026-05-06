@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:provider/provider.dart';
-import 'auth_service.dart';
-import 'api_service.dart';
+import 'local_storage_service.dart';
 
 class CourseResultScreen extends StatefulWidget {
   final List<List<dynamic>> courses;
@@ -32,13 +30,6 @@ class _CourseResultScreenState extends State<CourseResultScreen> {
   }
 
   Future<void> _saveCourse(int pageIndex) async {
-    final token = context.read<AuthService>().token;
-    if (token == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('로그인 후 저장할 수 있어요.')),
-      );
-      return;
-    }
     final course = widget.courses[pageIndex]
         .map((e) => Map<String, dynamic>.from(e as Map))
         .toList();
@@ -50,18 +41,12 @@ class _CourseResultScreenState extends State<CourseResultScreen> {
       'kakao_url': p['kakao_url'],
     }).toList();
 
-    final ok = await ApiService.saveCourse(token, widget.region, spots);
+    await LocalStorageService.saveCourse(widget.region, spots);
     if (!mounted) return;
-    if (ok) {
-      setState(() => _savedPages.add(pageIndex));
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('코스가 저장됐어요.')),
-      );
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('저장에 실패했어요.')),
-      );
-    }
+    setState(() => _savedPages.add(pageIndex));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('코스가 저장됐어요.')),
+    );
   }
 
   Future<void> _openKakaoMap(BuildContext context, Map<String, dynamic> place) async {
