@@ -16,7 +16,7 @@ sys.path.append(project_dir)
 
 from Preprocess.crawler.crawler_core import ChungnamCrawler
 
-from Preprocess.crawler.region_list import REGIONS
+from Preprocess.crawler.region_list import CHEONAN_REGIONS, ASAN_REGIONS, REGIONS
 from Preprocess.crawler.categories import CATEGORIES
 
 def run_worker_silent(args):
@@ -56,13 +56,43 @@ def run_worker_silent(args):
 if __name__ == "__main__":
     try:
         multiprocessing.set_start_method('spawn', force=True)
-    except RuntimeError: 
+    except RuntimeError:
         pass
 
-    total_subtasks = len(REGIONS) * len(CATEGORIES)
-    
-    core=5 #크롤링을 돌릴 코어 수 (본인 램 용량이나 CPU 사양에 따라 코어 수 조절.)
-    print(f"\n크롤링 작업을 시작합니다.(코어 갯수:{core})")
+    # 지역 선택
+    print("\n=== 충남 크롤링 설정 ===")
+    print("크롤링할 지역을 선택하세요:")
+    print("  1. 천안")
+    print("  2. 아산")
+    print("  3. 전체 (천안 + 아산)")
+    while True:
+        region_input = input("선택 (1/2/3): ").strip()
+        if region_input == "1":
+            target_regions = CHEONAN_REGIONS
+            label = "천안"
+            break
+        elif region_input == "2":
+            target_regions = ASAN_REGIONS
+            label = "아산"
+            break
+        elif region_input == "3":
+            target_regions = REGIONS
+            label = "전체"
+            break
+        else:
+            print("1, 2, 3 중 하나를 입력하세요.")
+
+    # 코어 수 선택 (최대 5)
+    while True:
+        core_input = input("사용할 코어 수를 입력하세요 (1~5): ").strip()
+        if core_input.isdigit() and 1 <= int(core_input) <= 5:
+            core = int(core_input)
+            break
+        else:
+            print("1에서 5 사이의 숫자를 입력하세요.")
+
+    total_subtasks = len(target_regions) * len(CATEGORIES)
+    print(f"\n크롤링 작업을 시작합니다. [대상: {label}] (코어 갯수: {core})")
     print(f"총 {total_subtasks}개의 세부 작업을 진행합니다.")
     print("-" * 60)
 
@@ -71,7 +101,7 @@ if __name__ == "__main__":
     
     pool = multiprocessing.Pool(processes=core, maxtasksperchild=1)
     
-    tasks = [(region, CATEGORIES, q) for region in REGIONS]
+    tasks = [(region, CATEGORIES, q) for region in target_regions]
 
     for t in tasks:
         pool.apply_async(run_worker_silent, (t,))
