@@ -1,223 +1,361 @@
+import json, math
 import pandas as pd
 from geopy.distance import geodesic
 
-# ============================================================
-# [점수 계산 수식]
-#
-# 1. Min-Max 정규화
-#    normalized = (x - min) / (max - min)
-#    → 방문자수, 블로그수를 각각 0~1 범위로 정규화
-#    → 두 변수의 스케일 차이(방문자수 최대 ~55,000 vs 블로그수 최대 ~14,000)를
-#      제거하여 가중치가 실질적으로 작동하게 만든다.
-#
-# 2. 인기 점수 S (Popularity Score)
-#    S = 0.7 × norm_visitors + 0.3 × norm_blogs
-#    → 방문자수에 70%, 블로그 리뷰수에 30% 가중치 부여
-#    → 두 값 모두 정규화된 0~1 범위이므로 가중치가 의미를 가짐
-#    → S 범위: 0~1
-#
-# 3. 유효 거리 D_eff (Effective Distance)
-#    대중교통/도보: D_eff = norm_dist + 0.5 × penalty
-#                  penalty = 1 if 실제거리 > 10km else 0
-#    승용차:        D_eff = norm_dist × 0.5
-#    → 실제 거리를 정규화(0~1)한 뒤 패널티 적용
-#    → 대중교통은 10km 초과 시 0.5 추가 패널티 (정규화 범위 내에서 의미있는 값)
-#    → 승용차는 이동 편의성을 반영해 거리 영향을 절반으로 감소
-#    → D_eff 범위: 0~1 (대중교통 패널티 포함 시 최대 1.5)
-#
-# 4. 최종 랭킹 점수 R (Ranking Score)
-#    R = S / (D_eff + 0.1)
-#    → 인기 점수를 유효 거리로 나눠 가깝고 인기있는 장소를 우선 추천
-#    → +0.1은 D_eff가 0에 가까울 때 R이 무한대로 발산하는 것을 방지
-#    → S와 D_eff 모두 정규화되어 있으므로 두 요소가 균형있게 반영됨
-#
-# 5. 최적 군집 선택 기준
-#    → 각 군집마다 해당 군집 중심에서 가장 가까운 교통 거점을 기준으로
-#      군집 내 모든 장소의 R을 계산한 뒤, 군집 평균 R이 가장 높은 군집 선택
-#    → 기존에는 인기도(S)만으로 군집을 선택했기 때문에,
-#      교통 거점에서 멀리 떨어진 군집이 선택되는 문제가 있었음
-#    → 평균 R 기준으로 선택하면 인기도와 접근성을 동시에 고려하게 됨
-#
-# 6. 거리 정규화 기준
-#    → 군집 내부 기준이 아닌 전체 유효 군집의 거리를 합산하여 전역 정규화 수행
-#    → 기존에는 군집별로 거리를 독립적으로 정규화했기 때문에,
-#      실제로 멀리 있는 군집도 내부적으로 0~1로 정규화되어
-#      절대 거리가 무시되는 문제가 있었음
-#    → 전역 정규화를 통해 멀리 있는 장소는 실제로 높은 norm_dist를 가지게 됨
-# ============================================================
 
-def minmax_normalize(series):
-    min_val = series.min()
-    max_val = series.max()
-    if max_val == min_val:
-        return series * 0  # 모든 값이 동일하면 0으로 처리
-    return (series - min_val) / (max_val - min_val)
-
-def calculate_score(norm_visitors, norm_blogs):
-    # S = 0.7 × 정규화된_방문자수 + 0.3 × 정규화된_블로그수
-    return 0.7 * norm_visitors + 0.3 * norm_blogs
-
-def calculate_eff_dist(norm_dist, d_real, transport):
-    if transport == '대중교통/도보':
-        # 10km 초과 시 0.5 추가 패널티 (정규화된 거리 기준에서 의미있는 값)
-        penalty = 0.5 if d_real > 10.0 else 0.0
-        return norm_dist + penalty
-    elif transport == '승용차':
-        # 승용차는 이동 편의성 반영해 거리 영향 절반으로 감소
-        return norm_dist * 0.5
-    return norm_dist
-
-def get_best_start_hub(cluster_center, region):
-    transit_hubs = {
-        '천안': [
-            {'name': '천안역', 'lat': 36.8066, 'lon': 127.1469},
-            {'name': '천안아산역', 'lat': 36.7944, 'lon': 127.1044},
-            {'name': '천안종합터미널', 'lat': 36.8198, 'lon': 127.1566},
-            {'name': '두정역', 'lat': 36.8336, 'lon': 127.1489},
-            {'name': '쌍용역', 'lat': 36.7936, 'lon': 127.1215},
-        ],
-        '아산': [
-            {'name': '온양온천역', 'lat': 36.7805, 'lon': 127.0032},
-            {'name': '아산시외버스터미널', 'lat': 36.7842, 'lon': 127.0156},
-            {'name': '배방역', 'lat': 36.7776, 'lon': 127.0529},
-            {'name': '탕정역', 'lat': 36.7885, 'lon': 127.0847},
-            {'name': '신창역', 'lat': 36.7696, 'lon': 126.9515}
-        ]
-    }
-
-    available_hubs = []
-    if '천안' in region:
-        available_hubs.extend(transit_hubs['천안'])
-    if '아산' in region:
-        available_hubs.extend(transit_hubs['아산'])
-
-    if not available_hubs:
-        return cluster_center, "군집 중심"
-
-    closest_hub = min(available_hubs, key=lambda hub: geodesic(cluster_center, (hub['lat'], hub['lon'])).kilometers)
-    return (closest_hub['lat'], closest_hub['lon']), closest_hub['name']
-
-def compute_r_for_cluster(cluster_df, start_point, transport, global_min_dist=None, global_max_dist=None):
+# ── 스코어링 ──────────────────────────────────────────────────
+def add_scores(df: pd.DataFrame, blog_tag_keywords: list) -> pd.DataFrame:
     """
-    주어진 군집 내 장소들의 R 점수를 계산하여 반환.
-    거리 정규화는 전역 기준(global_min_dist, global_max_dist)으로 수행.
-    → 군집별 독립 정규화 시 절대 거리가 무시되는 문제를 해결.
-    전역 기준값이 없으면 군집 내부 기준으로 fallback.
+    최종점수 = 0.4 × 인기도_norm + 0.6 × 태그_매칭_점수
+    인기도: log(방문자수 + 블로그수×0.3 + 1) Min-Max 정규화
+    태그매칭: blog_tag_keywords 중 블로그 태그에 포함된 비율
     """
-    df = cluster_df.copy()
-    df['d_real'] = df.apply(
-        lambda row: geodesic(start_point, (row['latitude'], row['longitude'])).kilometers, axis=1
-    )
+    df = df.copy()
 
-    if global_min_dist is not None and global_max_dist is not None and global_max_dist > global_min_dist:
-        # 전역 기준 정규화: 절대 거리가 반영됨
-        df['norm_dist'] = (df['d_real'] - global_min_dist) / (global_max_dist - global_min_dist)
+    raw = (df['방문자수'].fillna(0) + df['블로그수'].fillna(0) * 0.3 + 1).apply(math.log)
+    mn, mx = raw.min(), raw.max()
+    df['pop_score'] = ((raw - mn) / (mx - mn)).clip(0, 1) if mx > mn else 0.0
+
+    if blog_tag_keywords:
+        tokens = list({tok for kw in blog_tag_keywords for tok in kw.split()})
+        def _match(tags_json):
+            if pd.isna(tags_json):
+                return 0.0
+            try:
+                keys = ' '.join(json.loads(tags_json).keys())
+                return sum(1 for tok in tokens if tok in keys) / len(tokens)
+            except Exception:
+                return 0.0
+        df['tag_score'] = df['blog_tags'].apply(_match)
     else:
-        # fallback: 군집 내부 기준 정규화
-        df['norm_dist'] = minmax_normalize(df['d_real'])
+        df['tag_score'] = 0.0
 
-    df['D_eff'] = df.apply(lambda row: calculate_eff_dist(row['norm_dist'], row['d_real'], transport), axis=1)
-    df['R'] = df['S'] / (df['D_eff'] + 0.1)
+    df['score'] = 0.15 * df['pop_score'] + 0.85 * df['tag_score']
     return df
 
-def get_best_route(df_input, transport, region="천안/아산", user_lat=None, user_lng=None):
-    df = df_input.copy()
 
-    print(f"\n--- [{region}] 경로 추천 연산 시작 ---")
+# ── Greedy TSP ────────────────────────────────────────────────
+def greedy_tsp(records: list, start: tuple) -> list:
+    """출발점(start)에서 nearest-neighbor로 방문 순서 결정."""
+    route, current, remaining = [], start, list(records)
+    while remaining:
+        nearest = min(
+            remaining,
+            key=lambda p: geodesic(current, (p['latitude'], p['longitude'])).kilometers,
+        )
+        route.append(nearest)
+        remaining.remove(nearest)
+        current = (nearest['latitude'], nearest['longitude'])
+    return route
 
-    # 방문자수, 블로그수 각각 Min-Max 정규화 (0~1) — 전체 데이터 기준
-    df['norm_visitors'] = minmax_normalize(df['방문자수'])
-    df['norm_blogs'] = minmax_normalize(df['블로그수'])
 
-    # 인기 점수 S 계산 (정규화된 값 기반)
-    df['S'] = df.apply(lambda row: calculate_score(row['norm_visitors'], row['norm_blogs']), axis=1)
+# ── 코스 모드: 단일 계획에 대해 stop별 최적 장소 반환 ─────────
+_FOOD_KEYWORDS = {'한식', '중식', '일식', '양식', '고기', '닭갈비', '해산물',
+                  '국밥', '카페', '베이커리', '술집', '호프', '음식점', '식당'}
 
-    global_min_dist = None
-    global_max_dist = None
+def _is_food(category_filters: list) -> bool:
+    return any(kw in _FOOD_KEYWORDS for kw in category_filters)
 
-    if 'Cluster' in df.columns and len(df['Cluster'].unique()) > 1:
-        cluster_counts = df['Cluster'].value_counts()
-        valid_clusters = cluster_counts[cluster_counts >= 3].index
 
-        if len(valid_clusters) > 0:
-            # 군집별로 교통 거점을 기준으로 R을 계산하여 최적 군집 선택
-            # → 인기도(S)만 보던 기존 방식에서, 접근성까지 반영한 평균 R 기준으로 변경
+def find_best_for_plan(df: pd.DataFrame, stops: list, filter_fn) -> list:
+    """
+    Claude가 설계한 단일 코스 계획(stops)에 대해
+    각 stop의 최적 장소를 반환.
+    - 중복 장소 제외
+    - 음식점·카페는 코스 내 최대 1곳 강제
+    """
+    selected, used_names = [], set()
+    food_count   = 0
+    used_food_cats: set = set()  # 이미 사용된 음식 카테고리 (같은 대분류 반복 방지)
+    MAX_FOOD = 3  # 5-stop 코스 기준: 점심+저녁+카페 허용
 
-            # 전역 거리 정규화 기준 계산
-            # → 모든 유효 군집의 장소-거점 간 거리를 수집하여 전역 min/max 산출
-            # → 이를 통해 군집 간 절대 거리 비교가 가능해짐
-            all_distances = []
-            cluster_start_points = {}
-            for cluster_id in valid_clusters:
-                c_df = df[df['Cluster'] == cluster_id]
-                c_center = (c_df['latitude'].mean(), c_df['longitude'].mean())
-                if transport == '대중교통/도보':
-                    c_start_point, _ = get_best_start_hub(c_center, region)
-                else:
-                    c_start_point = c_center
-                cluster_start_points[cluster_id] = c_start_point
-                distances = c_df.apply(
-                    lambda row: geodesic(c_start_point, (row['latitude'], row['longitude'])).kilometers, axis=1
-                )
-                all_distances.extend(distances.tolist())
+    for stop in stops:
+        cat_f = stop['category_filters']
 
-            global_min_dist = min(all_distances)
-            global_max_dist = max(all_distances)
+        if _is_food(cat_f):
+            # 음식 할당량 초과 → 비음식 탐색
+            if food_count >= MAX_FOOD:
+                cat_f = []
+            # 같은 음식 카테고리 반복 → 비음식 탐색
+            elif any(c in used_food_cats for c in cat_f):
+                cat_f = []
 
-            cluster_r_scores = {}
-            for cluster_id in valid_clusters:
-                c_df = df[df['Cluster'] == cluster_id]
-                c_start_point = cluster_start_points[cluster_id]
-                c_df_with_r = compute_r_for_cluster(c_df, c_start_point, transport, global_min_dist, global_max_dist)
-                cluster_r_scores[cluster_id] = c_df_with_r['R'].mean()
+        cands = filter_fn(df, cat_f, stop['blog_tag_keywords'])
+        cands = add_scores(cands, stop['blog_tag_keywords'])
+        cands = cands[~cands['가게명'].isin(used_names)]
+        if cands.empty:
+            cands = filter_fn(df, cat_f, [])
+            cands = add_scores(cands, [])
+            cands = cands[~cands['가게명'].isin(used_names)]
+        if cands.empty:
+            cands = add_scores(df, [])
+            cands = cands[~cands['가게명'].isin(used_names)]
+        if cands.empty:
+            return []
 
-            best_cluster = max(cluster_r_scores, key=cluster_r_scores.get)
-            best_df = df[df['Cluster'] == best_cluster].copy()
-            print(f"[추천 모듈] 전역 거리 범위: {global_min_dist:.1f}km ~ {global_max_dist:.1f}km")
-            print(f"[추천 모듈] 군집별 평균 R 점수: { {k: round(v, 3) for k, v in cluster_r_scores.items()} }")
-            print(f"[추천 모듈] 선택된 최적 군집: {best_cluster}번 (장소 {len(best_df)}개)")
-        else:
-            best_df = df.copy()
-            print("[추천 모듈] 모든 군집의 장소가 3개 미만이므로 전체 데이터를 사용합니다.")
+        best = cands.nlargest(1, 'score').iloc[0].to_dict()
+        selected.append(best)
+        used_names.add(best['가게명'])
+        if _is_food(stop['category_filters']):
+            food_count += 1
+            used_food_cats.update(stop['category_filters'])
+
+    return selected
+
+
+# ── 고정 코스 템플릿: 음식→활동→카페→활동→음식 ──────────────
+FOOD_CATS = ['한식', '중식', '일식', '양식', '고기', '닭갈비', '해산물', '국밥', '술집', '호프']
+CAFE_CATS = ['카페', '베이커리']
+
+_ACTIVITY_GROUPS = [
+    ['공원', '산책로', '하천'],
+    ['자연공원', '관광지', '온천', '캠핑'],
+    ['박물관', '전시', '미술관', '문화재', '유적'],
+    ['시장', '쇼핑', '체험'],
+    ['키즈카페', '노래방', '볼링'],
+]
+
+# 코스별 활동 그룹 페어 (stop2, stop4 인덱스) — 최대 5코스
+_COURSE_ACT_PAIRS = [(0, 2), (1, 3), (4, 0), (3, 4), (2, 1)]
+
+
+def _pick_best(df, category_filters, blog_tag_keywords, filter_fn, used_names):
+    cands = filter_fn(df, category_filters, blog_tag_keywords)
+    cands = add_scores(cands, blog_tag_keywords)
+    cands = cands[~cands['가게명'].isin(used_names)]
+    if cands.empty:
+        cands = filter_fn(df, category_filters, [])
+        cands = add_scores(cands, [])
+        cands = cands[~cands['가게명'].isin(used_names)]
+    if cands.empty:
+        return None
+    return cands.nlargest(1, 'score').iloc[0].to_dict()
+
+
+def _matched_food_cats(place: dict) -> set:
+    cat = place.get('카테고리', '') or ''
+    return {c for c in FOOD_CATS if c in cat}
+
+
+SLOT_CATEGORY_MAP = {
+    '음식':     ['한식', '중식', '일식', '양식', '고기', '닭갈비', '해산물', '국밥', '음식점', '식당'],
+    '카페':     ['카페', '베이커리'],
+    '자연·산책': ['공원', '산책로', '하천', '자연공원', '수목원', '생태'],
+    '등산':     ['산', '등산', '트레킹', '계곡'],
+    '문화·역사': ['박물관', '전시', '미술관', '문화재', '유적', '기념관', '역사'],
+    '쇼핑':    ['시장', '쇼핑', '백화점', '아울렛'],
+    '관광지':   ['관광지', '온천', '캠핑', '테마공원'],
+    '실내 오락': ['키즈카페', '노래방', '볼링', '오락'],
+}
+
+
+def generate_from_slots(df, slot_types, blog_tag_keywords, filter_fn, n: int = 3):
+    """
+    사용자 정의 슬롯 순서로 코스 생성.
+    각 슬롯 타입 → SLOT_CATEGORY_MAP 카테고리로 장소 탐색.
+    블로그 키워드는 각 슬롯에서 스코어링 보조에만 사용.
+    """
+    if not slot_types:
+        return []
+
+    cluster_col = 'Cluster' if 'Cluster' in df.columns else None
+    cluster_ids = df[cluster_col].value_counts().index.tolist() if cluster_col else [None] * n
+
+    courses = []
+    globally_used = set()
+
+    for i, cid in enumerate(cluster_ids):
+        if len(courses) >= n:
+            break
+
+        c_df = df[df[cluster_col] == cid] if cid is not None else df
+        used_names = set(globally_used)
+        course = []
+        ok = True
+
+        for slot in slot_types:
+            cats = SLOT_CATEGORY_MAP.get(slot, [])
+            place = _pick_best(c_df, cats, blog_tag_keywords, filter_fn, used_names)
+            if place is None:
+                place = _pick_best(df, cats, blog_tag_keywords, filter_fn, used_names)
+            if place is None:
+                ok = False
+                break
+            course.append(place)
+            used_names.add(place['가게명'])
+
+        if ok:
+            courses.append(course)
+            globally_used.update(p['가게명'] for p in course)
+
+    return courses
+
+
+def generate_fixed_courses(df, blog_tag_keywords, filter_fn, n: int = 3, spots: int = 5):
+    """
+    Cluster-aware 템플릿 코스 생성. spots 파라미터로 코스당 스팟 수 조절.
+    - 3 stops: 음식 → 활동 → 카페
+    - 4 stops: 음식 → 활동 → 카페 → 활동
+    - 5 stops: 음식 → 활동 → 카페 → 활동 → 음식
+    """
+    cluster_col = 'Cluster' if 'Cluster' in df.columns else None
+
+    if cluster_col:
+        cluster_ids = df[cluster_col].value_counts().index.tolist()
     else:
-        best_df = df.copy()
+        cluster_ids = [None] * n
 
-    # 최적 군집의 교통 거점 확정
-    cluster_center = (best_df['latitude'].mean(), best_df['longitude'].mean())
+    courses = []
+    globally_used = set()
 
-    start_name = None
-    if transport == '대중교통/도보':
-        start_point, start_name = get_best_start_hub(cluster_center, region)
-        print(f"[추천 모듈] 대중교통 탐색 시작 기준점: {start_name} {start_point}")
-    else:
-        if user_lat is not None and user_lng is not None:
-            # GPS 좌표가 전달된 경우 실제 사용자 위치를 출발점으로 사용
-            start_point = (user_lat, user_lng)
-            print(f"[추천 모듈] 자가용 탐색 시작 기준점(GPS 현재 위치): {start_point}")
-        else:
-            # GPS 좌표가 없으면 군집 중심으로 fallback
-            start_point = cluster_center
-            print(f"[추천 모듈] 자가용 탐색 시작 기준점(군집 중심 fallback): {start_point}")
+    for i, cid in enumerate(cluster_ids):
+        if len(courses) >= n or i >= len(_COURSE_ACT_PAIRS):
+            break
 
-    # 최적 군집 내 최종 R 계산 (전역 거리 기준 적용)
-    global_min_dist = global_min_dist if 'global_min_dist' in dir() else None
-    global_max_dist = global_max_dist if 'global_max_dist' in dir() else None
-    best_df = compute_r_for_cluster(best_df, start_point, transport, global_min_dist, global_max_dist)
+        act_idx1, act_idx2 = _COURSE_ACT_PAIRS[i]
+        c_df = df[df[cluster_col] == cid] if cid is not None else df
+        used_names = set(globally_used)
+        used_food_cats: set = set()
+        course = []
 
-    top_places = best_df.nlargest(3, 'R')
+        def pick(cats, tags, _c=c_df, _full=df, _used=used_names):
+            r = _pick_best(_c, cats, tags, filter_fn, _used)
+            if r is None:
+                r = _pick_best(_full, cats, tags, filter_fn, _used)
+            return r
 
-    print("\n[추천 모듈] 상위 3개 장소 선정 결과 (순위 로그):")
-    for _, row in top_places.iterrows():
-        print(f"- {row['가게명']} | 방문자:{row['방문자수']}, 블로그:{row['블로그수']} | 인기점수(S):{row['S']:.3f} | 실제거리:{row['d_real']:.1f}km | 유효거리(D_eff):{row['D_eff']:.3f} | 최종점수(R):{row['R']:.3f}")
+        # Stop 1: 음식점
+        food1 = pick(FOOD_CATS, blog_tag_keywords)
+        if food1 is None:
+            continue
+        course.append(food1)
+        used_names.add(food1['가게명'])
+        used_food_cats.update(_matched_food_cats(food1))
 
-    final_route = []
-    current_loc = start_point
-    unvisited = top_places.to_dict('records')
+        # Stop 2: 활동 (그룹 act_idx1)
+        act1 = pick(_ACTIVITY_GROUPS[act_idx1], blog_tag_keywords)
+        if act1 is None:
+            for g in _ACTIVITY_GROUPS:
+                if g is not _ACTIVITY_GROUPS[act_idx1]:
+                    act1 = pick(g, blog_tag_keywords)
+                    if act1:
+                        break
+        if act1 is None:
+            continue
+        course.append(act1)
+        used_names.add(act1['가게명'])
 
-    while unvisited:
-        next_place = min(unvisited, key=lambda x: geodesic(current_loc, (x['latitude'], x['longitude'])).kilometers)
-        final_route.append(next_place)
-        unvisited.remove(next_place)
-        current_loc = (next_place['latitude'], next_place['longitude'])
+        # Stop 3: 카페
+        cafe = pick(CAFE_CATS, blog_tag_keywords)
+        if cafe is None:
+            continue
+        course.append(cafe)
+        used_names.add(cafe['가게명'])
 
-    return final_route, start_point, start_name
+        if spots == 3:
+            courses.append(course)
+            globally_used.update(p['가게명'] for p in course)
+            continue
+
+        # Stop 4: 활동 (그룹 act_idx2, stop2와 다른 그룹)
+        act2 = pick(_ACTIVITY_GROUPS[act_idx2], blog_tag_keywords)
+        if act2 is None:
+            for g in _ACTIVITY_GROUPS:
+                if g is not _ACTIVITY_GROUPS[act_idx1] and g is not _ACTIVITY_GROUPS[act_idx2]:
+                    act2 = pick(g, blog_tag_keywords)
+                    if act2:
+                        break
+        if act2 is None:
+            continue
+        course.append(act2)
+        used_names.add(act2['가게명'])
+
+        if spots == 4:
+            courses.append(course)
+            globally_used.update(p['가게명'] for p in course)
+            continue
+
+        # Stop 5: 음식점 (stop1과 다른 카테고리)
+        remaining_food = [c for c in FOOD_CATS if c not in used_food_cats]
+        food2 = pick(remaining_food or FOOD_CATS, blog_tag_keywords)
+        if food2 is None:
+            continue
+        course.append(food2)
+        used_names.add(food2['가게명'])
+
+        courses.append(course)
+        globally_used.update(p['가게명'] for p in course)
+
+    return courses
+
+
+# ── 코스 모드: 군집별 3-stop 선택 (상위 N개 코스 반환) ───────
+def select_courses(clustered: pd.DataFrame, stops: list, filter_fn, top_n: int = 3) -> list:
+    """
+    각 군집에서 stops 조건에 맞는 장소를 하나씩 뽑아
+    합산 점수 기준 상위 top_n개 코스를 반환.
+
+    filter_fn(df, category_filters, blog_tag_keywords) → filtered_df
+    반환값: [{"course": [place, place, place], "total_score": float}, ...]
+    """
+    cluster_col = 'Cluster' if 'Cluster' in clustered.columns else None
+    cluster_ids = clustered[cluster_col].unique() if cluster_col else [0]
+
+    candidates = []
+    globally_used = set()  # 이미 다른 코스에서 선택된 장소 (코스 간 중복 방지)
+
+    for cid in cluster_ids:
+        c_df = clustered[clustered[cluster_col] == cid] if cluster_col else clustered
+
+        selected, used_names, total = [], set(globally_used), 0.0
+        for stop in stops:
+            cands = filter_fn(c_df, stop['category_filters'], stop['blog_tag_keywords'])
+            cands = add_scores(cands, stop['blog_tag_keywords'])
+            cands = cands[~cands['가게명'].isin(used_names)]
+            if cands.empty:
+                # 클러스터 내에서 못 찾으면 전체 반경으로 확장
+                cands = filter_fn(clustered, stop['category_filters'], stop['blog_tag_keywords'])
+                cands = add_scores(cands, stop['blog_tag_keywords'])
+                cands = cands[~cands['가게명'].isin(used_names)]
+            if cands.empty:
+                break
+            best_row = cands.nlargest(1, 'score').iloc[0].to_dict()
+            selected.append(best_row)
+            used_names.add(best_row['가게명'])
+            total += best_row['score']
+
+        if len(selected) == 3:
+            candidates.append({'course': selected, 'total_score': total})
+            globally_used.update(r['가게명'] for r in selected)
+
+    candidates.sort(key=lambda x: x['total_score'], reverse=True)
+    if candidates:
+        return candidates[:top_n]
+
+    # 클러스터 탐색 실패 시 전체 반경에서 stop별 최고 장소 조합으로 fallback
+    def _pick_for_stop(df, stop, used):
+        # 1단계: 카테고리 + 태그 필터
+        cands = filter_fn(df, stop['category_filters'], stop['blog_tag_keywords'])
+        cands = add_scores(cands, stop['blog_tag_keywords'])
+        cands = cands[~cands['가게명'].isin(used)]
+        if not cands.empty:
+            return cands.nlargest(1, 'score').iloc[0].to_dict()
+        # 2단계: 카테고리만 (태그 완화)
+        cands = filter_fn(df, stop['category_filters'], [])
+        cands = add_scores(cands, [])
+        cands = cands[~cands['가게명'].isin(used)]
+        if not cands.empty:
+            return cands.nlargest(1, 'score').iloc[0].to_dict()
+        # 3단계: 인기도 순 (카테고리도 없음, 최후 수단)
+        cands = add_scores(df, [])
+        cands = cands[~cands['가게명'].isin(used)]
+        return cands.nlargest(1, 'score').iloc[0].to_dict()
+
+    selected, used_names, total = [], set(), 0.0
+    for stop in stops:
+        best_row = _pick_for_stop(clustered, stop, used_names)
+        selected.append(best_row)
+        used_names.add(best_row['가게명'])
+        total += best_row['score']
+
+    return [{'course': selected, 'total_score': total}]
