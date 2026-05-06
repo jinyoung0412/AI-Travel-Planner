@@ -52,7 +52,7 @@ class HomeScreen extends StatelessWidget {
               ),
               const SizedBox(height: 56),
               _ModeCard(
-                title: '지금 당장 뭘 할지',
+                title: '스팟 추천',
                 subtitle: '밥집, 카페, 산책 등\n한 가지 장소 즉시 탐색',
                 icon: Icons.bolt_rounded,
                 color: const Color(0xFFFF7043),
@@ -60,8 +60,8 @@ class HomeScreen extends StatelessWidget {
               ),
               const SizedBox(height: 16),
               _ModeCard(
-                title: '오늘 하루 뭘 할지',
-                subtitle: '다양한 카테고리로 구성된\n3-stop 당일 코스 추천',
+                title: '코스 추천',
+                subtitle: '내가 원하는 순서로\n당일 코스 직접 구성',
                 icon: Icons.route_rounded,
                 color: const Color(0xFF26C6DA),
                 mode: 'course',

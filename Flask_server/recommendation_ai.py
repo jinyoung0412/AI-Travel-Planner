@@ -17,12 +17,13 @@ def add_scores(df: pd.DataFrame, blog_tag_keywords: list) -> pd.DataFrame:
     df['pop_score'] = ((raw - mn) / (mx - mn)).clip(0, 1) if mx > mn else 0.0
 
     if blog_tag_keywords:
+        tokens = list({tok for kw in blog_tag_keywords for tok in kw.split()})
         def _match(tags_json):
             if pd.isna(tags_json):
                 return 0.0
             try:
                 keys = ' '.join(json.loads(tags_json).keys())
-                return sum(1 for kw in blog_tag_keywords if kw in keys) / len(blog_tag_keywords)
+                return sum(1 for tok in tokens if tok in keys) / len(tokens)
             except Exception:
                 return 0.0
         df['tag_score'] = df['blog_tags'].apply(_match)
@@ -136,19 +137,72 @@ def _matched_food_cats(place: dict) -> set:
     return {c for c in FOOD_CATS if c in cat}
 
 
-def generate_fixed_courses(df, blog_tag_keywords, filter_fn, n: int = 3):
+SLOT_CATEGORY_MAP = {
+    '음식':     ['한식', '중식', '일식', '양식', '고기', '닭갈비', '해산물', '국밥', '음식점', '식당'],
+    '카페':     ['카페', '베이커리'],
+    '자연·산책': ['공원', '산책로', '하천', '자연공원', '수목원', '생태'],
+    '등산':     ['산', '등산', '트레킹', '계곡'],
+    '문화·역사': ['박물관', '전시', '미술관', '문화재', '유적', '기념관', '역사'],
+    '쇼핑':    ['시장', '쇼핑', '백화점', '아울렛'],
+    '관광지':   ['관광지', '온천', '캠핑', '테마공원'],
+    '실내 오락': ['키즈카페', '노래방', '볼링', '오락'],
+}
+
+
+def generate_from_slots(df, slot_types, blog_tag_keywords, filter_fn, n: int = 3):
     """
-    Cluster-aware 5-stop 템플릿 코스 생성.
-    df에 'Cluster' 컬럼이 있으면 클러스터별로 코스를 구성 (지리적 집중).
-    각 stop은 해당 클러스터에서 먼저 탐색, 없으면 전체 df fallback.
+    사용자 정의 슬롯 순서로 코스 생성.
+    각 슬롯 타입 → SLOT_CATEGORY_MAP 카테고리로 장소 탐색.
+    블로그 키워드는 각 슬롯에서 스코어링 보조에만 사용.
+    """
+    if not slot_types:
+        return []
+
+    cluster_col = 'Cluster' if 'Cluster' in df.columns else None
+    cluster_ids = df[cluster_col].value_counts().index.tolist() if cluster_col else [None] * n
+
+    courses = []
+    globally_used = set()
+
+    for i, cid in enumerate(cluster_ids):
+        if len(courses) >= n:
+            break
+
+        c_df = df[df[cluster_col] == cid] if cid is not None else df
+        used_names = set(globally_used)
+        course = []
+        ok = True
+
+        for slot in slot_types:
+            cats = SLOT_CATEGORY_MAP.get(slot, [])
+            place = _pick_best(c_df, cats, blog_tag_keywords, filter_fn, used_names)
+            if place is None:
+                place = _pick_best(df, cats, blog_tag_keywords, filter_fn, used_names)
+            if place is None:
+                ok = False
+                break
+            course.append(place)
+            used_names.add(place['가게명'])
+
+        if ok:
+            courses.append(course)
+            globally_used.update(p['가게명'] for p in course)
+
+    return courses
+
+
+def generate_fixed_courses(df, blog_tag_keywords, filter_fn, n: int = 3, spots: int = 5):
+    """
+    Cluster-aware 템플릿 코스 생성. spots 파라미터로 코스당 스팟 수 조절.
+    - 3 stops: 음식 → 활동 → 카페
+    - 4 stops: 음식 → 활동 → 카페 → 활동
+    - 5 stops: 음식 → 활동 → 카페 → 활동 → 음식
     """
     cluster_col = 'Cluster' if 'Cluster' in df.columns else None
 
     if cluster_col:
-        # 큰 클러스터 먼저 시도 (장소 다양성 확보 유리)
         cluster_ids = df[cluster_col].value_counts().index.tolist()
     else:
-        # 클러스터 없음 → 전체 풀에서 n회 반복 (기존 동작)
         cluster_ids = [None] * n
 
     courses = []
@@ -198,6 +252,11 @@ def generate_fixed_courses(df, blog_tag_keywords, filter_fn, n: int = 3):
         course.append(cafe)
         used_names.add(cafe['가게명'])
 
+        if spots == 3:
+            courses.append(course)
+            globally_used.update(p['가게명'] for p in course)
+            continue
+
         # Stop 4: 활동 (그룹 act_idx2, stop2와 다른 그룹)
         act2 = pick(_ACTIVITY_GROUPS[act_idx2], blog_tag_keywords)
         if act2 is None:
@@ -210,6 +269,11 @@ def generate_fixed_courses(df, blog_tag_keywords, filter_fn, n: int = 3):
             continue
         course.append(act2)
         used_names.add(act2['가게명'])
+
+        if spots == 4:
+            courses.append(course)
+            globally_used.update(p['가게명'] for p in course)
+            continue
 
         # Stop 5: 음식점 (stop1과 다른 카테고리)
         remaining_food = [c for c in FOOD_CATS if c not in used_food_cats]
