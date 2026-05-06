@@ -6,7 +6,7 @@
         <package android:name="net.daum.android.map" />
     </queries>
     <application
-        android:label="ai_travel_app"
+        android:label="오늘 충남"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
