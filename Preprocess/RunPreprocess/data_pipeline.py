@@ -132,14 +132,8 @@ def run_pipeline():
 
     merged_df['방문자수'] = merged_df['방문자수'].fillna(0).astype(float)
     merged_df['블로그수'] = merged_df['블로그수'].fillna(0).astype(float)
-
-    def minmax(series):
-        min_v, max_v = series.min(), series.max()
-        if max_v == min_v:
-            return series * 0
-        return (series - min_v) / (max_v - min_v)
-
-    merged_df['평점'] = (0.7 * minmax(merged_df['방문자수']) + 0.3 * minmax(merged_df['블로그수'])).round(4)
+    merged_df['평점'] = merged_df['방문자수'] + (merged_df['블로그수'] * 0.3)
+    merged_df['평점'] = merged_df['평점'].round(1)
 
     merged_df.to_csv(final_output_file, index=False, encoding="utf-8-sig")
 
