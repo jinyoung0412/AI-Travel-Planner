@@ -39,6 +39,8 @@ class ApiService {
     required double userLng,
     required List<String> personaTags,
     required int count,
+    int spotCount = 5,
+    List<String> slotTypes = const [],
   }) async {
     return _post('/recommend/course', {
       'transport': transport,
@@ -47,7 +49,33 @@ class ApiService {
       'user_lng': userLng,
       'persona_tags': personaTags,
       'count': count,
+      'spot_count': spotCount,
+      'slot_types': slotTypes,
     });
+  }
+
+  static Future<String?> getKakaoPlaceUrl({
+    required String name,
+    required double lat,
+    required double lng,
+  }) async {
+    try {
+      final uri = Uri.parse('$baseUrl/kakao/place').replace(
+        queryParameters: {
+          'name': name,
+          'lat': lat.toString(),
+          'lng': lng.toString(),
+        },
+      );
+      final response = await http.get(uri);
+      if (response.statusCode == 200) {
+        final data = jsonDecode(utf8.decode(response.bodyBytes));
+        return data['place_url'] as String?;
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
   }
 
   static Future<Map<String, dynamic>?> _post(String path, Map<String, dynamic> body) async {
