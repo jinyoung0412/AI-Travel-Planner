@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:provider/provider.dart';
 import 'api_service.dart';
+import 'auth_service.dart';
 
 class SpotResultScreen extends StatelessWidget {
   final List<Map<String, dynamic>> places;
@@ -67,6 +69,36 @@ class _PlaceCard extends StatefulWidget {
 
 class _PlaceCardState extends State<_PlaceCard> {
   bool _isLoading = false;
+  bool _saved = false;
+
+  Future<void> _saveSpot() async {
+    final token = context.read<AuthService>().token;
+    if (token == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('로그인 후 저장할 수 있어요.')),
+      );
+      return;
+    }
+    final p = widget.place;
+    final ok = await ApiService.saveSpot(token, {
+      'name': p['name'] ?? '',
+      'lat': p['lat'],
+      'lng': p['lng'],
+      'category': p['category'] ?? '',
+      'kakao_url': p['kakao_url'],
+    });
+    if (!mounted) return;
+    if (ok) {
+      setState(() => _saved = true);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('저장됐어요.')),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('저장에 실패했어요.')),
+      );
+    }
+  }
 
   Future<void> _openKakaoDetail() async {
     setState(() => _isLoading = true);
@@ -155,8 +187,22 @@ class _PlaceCardState extends State<_PlaceCard> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(name,
-                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(name,
+                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                    ),
+                    GestureDetector(
+                      onTap: _saved ? null : _saveSpot,
+                      child: Icon(
+                        _saved ? Icons.bookmark_rounded : Icons.bookmark_outline_rounded,
+                        size: 22,
+                        color: const Color(0xFFFF7043),
+                      ),
+                    ),
+                  ],
+                ),
                 const SizedBox(height: 4),
                 if (category.isNotEmpty)
                   Container(

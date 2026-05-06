@@ -1,11 +1,20 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:provider/provider.dart';
+import 'auth_service.dart';
+import 'api_service.dart';
 
 class CourseResultScreen extends StatefulWidget {
   final List<List<dynamic>> courses;
   final int requestedCount;
+  final String region;
 
-  const CourseResultScreen({super.key, required this.courses, required this.requestedCount});
+  const CourseResultScreen({
+    super.key,
+    required this.courses,
+    required this.requestedCount,
+    this.region = '',
+  });
 
   @override
   State<CourseResultScreen> createState() => _CourseResultScreenState();
@@ -14,11 +23,45 @@ class CourseResultScreen extends StatefulWidget {
 class _CourseResultScreenState extends State<CourseResultScreen> {
   final PageController _pageController = PageController();
   int _currentPage = 0;
+  final Set<int> _savedPages = {};
 
   @override
   void dispose() {
     _pageController.dispose();
     super.dispose();
+  }
+
+  Future<void> _saveCourse(int pageIndex) async {
+    final token = context.read<AuthService>().token;
+    if (token == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('로그인 후 저장할 수 있어요.')),
+      );
+      return;
+    }
+    final course = widget.courses[pageIndex]
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+    final spots = course.map((p) => {
+      'name': p['name'] ?? '',
+      'lat': p['lat'],
+      'lng': p['lng'],
+      'category': p['category'] ?? '',
+      'kakao_url': p['kakao_url'],
+    }).toList();
+
+    final ok = await ApiService.saveCourse(token, widget.region, spots);
+    if (!mounted) return;
+    if (ok) {
+      setState(() => _savedPages.add(pageIndex));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('코스가 저장됐어요.')),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('저장에 실패했어요.')),
+      );
+    }
   }
 
   Future<void> _openKakaoMap(BuildContext context, Map<String, dynamic> place) async {
@@ -50,6 +93,19 @@ class _CourseResultScreenState extends State<CourseResultScreen> {
         elevation: 0,
         foregroundColor: const Color(0xFF1A1A1A),
         title: const Text('추천 코스', style: TextStyle(fontWeight: FontWeight.bold)),
+        actions: [
+          IconButton(
+            icon: Icon(
+              _savedPages.contains(_currentPage)
+                  ? Icons.bookmark_rounded
+                  : Icons.bookmark_outline_rounded,
+              color: const Color(0xFF26C6DA),
+            ),
+            onPressed: _savedPages.contains(_currentPage)
+                ? null
+                : () => _saveCourse(_currentPage),
+          ),
+        ],
       ),
       body: Column(
         children: [
