@@ -316,6 +316,7 @@ class _InputScreenState extends State<InputScreen> {
                   .map((c) => List<Map<String, dynamic>>.from(c)),
             ),
             requestedCount: _resultCount,
+            region: _region,
           ),
         ));
       }
