@@ -1,8 +1,19 @@
 import 'package:flutter/material.dart';
+import 'package:kakao_flutter_sdk_user/kakao_flutter_sdk_user.dart';
+import 'package:provider/provider.dart';
+import 'auth_service.dart';
 import 'input_screen.dart';
+import 'saved_screen.dart';
 
-void main() {
-  runApp(const MyApp());
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  KakaoSdk.init(nativeAppKey: 'b5d634b3a91dd5db5059c1b96c2a000e');
+  runApp(
+    ChangeNotifierProvider(
+      create: (_) => AuthService()..loadFromPrefs(),
+      child: const MyApp(),
+    ),
+  );
 }
 
 class MyApp extends StatelessWidget {
@@ -27,6 +38,7 @@ class HomeScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final auth = context.watch<AuthService>();
     return Scaffold(
       backgroundColor: const Color(0xFFFFF8F3),
       body: SafeArea(
@@ -35,7 +47,43 @@ class HomeScreen extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const SizedBox(height: 32),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const SizedBox.shrink(),
+                  Row(
+                    children: [
+                      if (auth.isLoggedIn) ...[
+                        IconButton(
+                          icon: const Icon(Icons.bookmark_outline_rounded),
+                          onPressed: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (_) => const SavedScreen()),
+                          ),
+                        ),
+                        GestureDetector(
+                          onTap: () => _showProfileMenu(context, auth),
+                          child: CircleAvatar(
+                            radius: 16,
+                            backgroundImage: auth.profileImg != null
+                                ? NetworkImage(auth.profileImg!)
+                                : null,
+                            child: auth.profileImg == null
+                                ? const Icon(Icons.person, size: 18)
+                                : null,
+                          ),
+                        ),
+                      ] else
+                        TextButton(
+                          onPressed: () => _login(context, auth),
+                          child: const Text('로그인',
+                              style: TextStyle(color: Color(0xFFFF7043))),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
               const Text(
                 '지금 어디\n가볼까요?',
                 style: TextStyle(
@@ -68,6 +116,41 @@ class HomeScreen extends StatelessWidget {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _login(BuildContext context, AuthService auth) async {
+    final ok = await auth.loginWithKakao();
+    if (!ok && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('로그인에 실패했어요.')),
+      );
+    }
+  }
+
+  void _showProfileMenu(BuildContext context, AuthService auth) {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(auth.nickname ?? '사용자',
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 20),
+            ListTile(
+              leading: const Icon(Icons.logout),
+              title: const Text('로그아웃'),
+              onTap: () { Navigator.pop(context); auth.logout(); },
+            ),
+          ],
         ),
       ),
     );

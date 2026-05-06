@@ -78,6 +78,72 @@ class ApiService {
     }
   }
 
+  // ── 저장 API ────────────────────────────────────────────────
+
+  static Future<List<dynamic>> getSavedSpots(String token) async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/saves/spots'),
+        headers: {'Authorization': 'Bearer $token'},
+      );
+      if (response.statusCode == 200) return jsonDecode(utf8.decode(response.bodyBytes));
+      return [];
+    } catch (_) { return []; }
+  }
+
+  static Future<bool> saveSpot(String token, Map<String, dynamic> spot) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/saves/spots'),
+        headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer $token'},
+        body: jsonEncode(spot),
+      );
+      return response.statusCode == 200;
+    } catch (_) { return false; }
+  }
+
+  static Future<bool> deleteSpot(String token, int id) async {
+    try {
+      final response = await http.delete(
+        Uri.parse('$baseUrl/saves/spots/$id'),
+        headers: {'Authorization': 'Bearer $token'},
+      );
+      return response.statusCode == 200;
+    } catch (_) { return false; }
+  }
+
+  static Future<List<dynamic>> getSavedCourses(String token) async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/saves/courses'),
+        headers: {'Authorization': 'Bearer $token'},
+      );
+      if (response.statusCode == 200) return jsonDecode(utf8.decode(response.bodyBytes));
+      return [];
+    } catch (_) { return []; }
+  }
+
+  static Future<bool> saveCourse(String token, String region, List<Map<String, dynamic>> spots) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/saves/courses'),
+        headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer $token'},
+        body: jsonEncode({'region': region, 'spots': spots}),
+      );
+      return response.statusCode == 200;
+    } catch (_) { return false; }
+  }
+
+  static Future<bool> deleteCourse(String token, int id) async {
+    try {
+      final response = await http.delete(
+        Uri.parse('$baseUrl/saves/courses/$id'),
+        headers: {'Authorization': 'Bearer $token'},
+      );
+      return response.statusCode == 200;
+    } catch (_) { return false; }
+  }
+
   static Future<Map<String, dynamic>?> _post(String path, Map<String, dynamic> body) async {
     try {
       final response = await http.post(
