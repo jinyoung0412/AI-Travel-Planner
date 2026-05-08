@@ -274,9 +274,9 @@ def recommend_spot():
 
         # Claude 호출 #1: 텍스트 → 카테고리 필터
         cat_f = extract_spot_category(user_text) if user_text else []
-        # 텍스트 카테고리 없으면 페르소나 태그에서 카테고리 힌트 추출
-        if not cat_f:
-            cat_f = derive_category_from_tags(persona_tags)
+        # 태그 기반 카테고리를 항상 병합 (Claude가 "음식점" 같은 상위 개념 반환 시 DB 미스매치 보완)
+        tag_cats = derive_category_from_tags(persona_tags)
+        cat_f = list(dict.fromkeys(cat_f + tag_cats))
         # Claude 호출 #2: 선택 페르소나 태그 → 블로그 검색 키워드
         tag_f = expand_persona_tags(persona_tags, region, get_season())
 
