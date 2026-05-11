@@ -47,7 +47,7 @@ def perform_clustering(df, transport='대중교통'):
     # 탐색할 최대 군집 수: 데이터 수의 제곱근 (경험적 상한선)
     # 이동수단에 따라 탐색 범위를 조정 (승용차는 더 넓은 범위 허용)
     if transport == '대중교통':
-        max_k = max(2, int(total_places ** 0.5) // 2)
+        max_k = max(2, int(total_places ** 0.5) // 3)
     else:
         max_k = max(2, int(total_places ** 0.5))
 
