@@ -182,7 +182,7 @@ def derive_category_from_tags(persona_tags: list) -> list:
 
 
 # ── 반경 필터 ─────────────────────────────────────────────────
-RADIUS_KM = {'차': 15.0, '대중교통': 7.0}
+RADIUS_KM = {'차': 15.0, '대중교통': 4.5}
 
 
 def filter_radius(df: pd.DataFrame, lat: float, lng: float, transport: str) -> pd.DataFrame:
