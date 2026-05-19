@@ -1,9 +1,9 @@
-# AI 기반 맞춤형 천안/아산 여행 코스 추천 시스템
+# 오늘 충남 — AI 기반 천안/아산 당일 여행 추천 앱
 
 ## 1. 프로젝트 개요
 
-사용자의 이동 수단(승용차/대중교통), 출발 지역, 여행 테마를 입력하면 충청남도 내 최적화된 당일치기 3개 코스를 추천하는 AI 서비스입니다.
-단순 평점 순위가 아닌, 사용자의 기동성에 따른 거리 패널티를 수학적으로 계산하고 최소 이동 거리(TSP)를 고려하여 실질적인 여행 경로를 제공합니다.
+사용자의 이동 수단, 출발 지역, 여행 취향 태그를 입력하면 충남 천안·아산 지역의 스팟 또는 당일 코스를 AI가 추천하는 모바일 서비스입니다.
+단순 평점 순위가 아닌, 사용자 기동성에 따른 거리 패널티·블로그 태그 매칭 점수를 복합 계산하고, 최소 이동 거리(TSP)를 고려하여 실질적인 여행 경로를 제공합니다.
 
 ---
 
@@ -11,9 +11,9 @@
 
 | 역할 | 담당 |
 |------|------|
-| 정진영(팀장) | AI 알고리즘 설계 및 초기 구현 / 백엔드 서버 파이프라인 구축 및 유지보수 / Flutter 기반 모바일 앱 UI/UX구현 및 유지보수 / 제작총괄|
-| 김승진 | 크롤링 프로그램 설계 및 유지보수 / 기타 전처리 작업 수행|
-| 송예성 | AI 알고리즘 유지보수 및 추가기능 개발|
+| 정진영(팀장) | AI 알고리즘 설계 및 초기 구현 / 백엔드 서버 파이프라인 구축 및 유지보수 / Flutter 기반 모바일 앱 UI/UX 구현 및 유지보수 / 제작총괄 |
+| 김승진 | 크롤링 프로그램 설계 및 유지보수 / 기타 전처리 작업 수행 |
+| 송예성 | AI 알고리즘 유지보수 및 추가기능 개발 |
 | 홍성재 | AI 알고리즘 유지보수 보조 |
 | 최형우 | AI 알고리즘 유지보수 보조 |
 
@@ -26,8 +26,11 @@
 | Frontend | Flutter (Dart) |
 | API Gateway | Node.js, Express |
 | AI Engine | Python, Flask |
-| AI / Data | Pandas, Scikit-learn (K-Means), Geopy |
+| AI / Data | Pandas, Scikit-learn (K-Means + Silhouette Score), Geopy |
+| LLM | Claude API (Anthropic) — 태그 제안, 카테고리 추출, 블로그 키워드 생성 |
 | 데이터 수집 | Selenium, BeautifulSoup (Naver Map 크롤링) |
+| 로컬 저장 | SharedPreferences (Flutter) |
+| 지도 연동 | 카카오맵 API |
 
 ---
 
@@ -37,35 +40,40 @@
 Flutter App (android_app/)
     ↓ HTTP POST
 Node.js API Gateway (NodeJs_server/, port 8080)
-    → 요청 검증 후 Flask 서버로 전달
+    → 요청 검증 후 Flask 서버로 전달 / 카카오맵 URL 직접 조회
     ↓ HTTP POST (localhost:5000)
 Flask AI Engine (Flask_server/, port 5000)
-    → K-Means 군집화 + 가중치 랭킹 + TSP 동선 정렬
-    ← 최적 3개 여행지 순서 반환
+    → Claude API 호출 (태그 제안 / 카테고리 추출 / 블로그 키워드 확장)
+    → 반경 필터 → 카테고리·블로그 태그 필터 → K-Means 군집화
+    → 가중치 랭킹 + Greedy TSP 동선 정렬
+    ← 스팟 목록 또는 코스 목록 반환
 ```
 
 ---
 
 ## 5. 핵심 추천 알고리즘
 
-`Flask_server/app.py`에 구현된 3단계 파이프라인입니다.
+### 스팟 추천 (`/recommend/spot`)
 
-### Step 1: K-Means 군집화 (Clustering)
-여행지 데이터를 지리적 위치(위도, 경도)를 기준으로 K개의 군집으로 나눕니다.
-동선이 넓게 퍼지는 것을 방지하기 위해, 평균 평점이 가장 높은 우수 군집 하나를 후보군으로 선정합니다.
+1. **Claude 카테고리 추출** — 사용자 자유 입력 텍스트에서 찾는 장소 종류 추출
+2. **반경 필터** — 이동 수단에 따라 후보 장소를 반경 내로 제한 (대중교통 4.5km / 차 15km)
+3. **카테고리·블로그 태그 필터** — 카테고리 조건 + 블로그 해시태그 키워드 매칭
+4. **가중치 랭킹** — `score = (방문자수 × w1 + 블로그수 × w2) / 거리 패널티 + 블로그 태그 매칭 보너스`
+5. **Greedy TSP** — 상위 N개 장소를 사용자 위치 기준 최단 동선으로 정렬
 
-### Step 2: 이동 수단 기반 가중치 랭킹 산출
-각 장소의 방문자 수와 블로그 리뷰 수를 바탕으로 점수(S)를 계산하고,
-사용자의 이동 수단에 따라 유효 거리(D_eff)에 차등 가중치를 적용하여 랭킹 점수(R)를 도출합니다.
+### 코스 추천 (`/recommend/course`)
 
-- **랭킹 공식:** `R = S / D_eff`
-  - `S = 방문자 수 + 0.3 × 블로그 리뷰 수`
-- **대중교통 / 도보:** 실제 거리 10km 초과 시 거리 값 3배 패널티 적용
-- **승용차:** 전체 거리 값 0.5배 완화 적용
+1. **반경 필터** → **K-Means 군집화** (Silhouette Score로 최적 군집 수 자동 결정)
+2. **슬롯 구성** — 식사·카페·관광 등 시간대별 장소 타입을 조합하여 당일 코스 구성
+3. **블로그 태그 스코어링** — 사용자 취향 태그와 장소별 블로그 해시태그 매칭으로 정렬
 
-### Step 3: 최단 동선 최적화 (Greedy TSP)
-랭킹 점수 기준 상위 3개 장소를 추출한 후,
-사용자의 출발 지역을 기준으로 가장 가까운 장소부터 순차 방문하도록 탐욕 알고리즘으로 최종 동선을 정렬합니다.
+### Claude API 활용
+
+| 엔드포인트 | 역할 |
+|---|---|
+| `/suggest/tags` | 자유 입력 텍스트 → 취향 태그 자동 제안 |
+| `/recommend/spot` | 텍스트 → 카테고리 추출, 태그 → 블로그 검색 키워드 확장 |
+| `/recommend/course` | 태그 → 블로그 검색 키워드 확장 |
 
 ---
 
@@ -73,28 +81,34 @@ Flask AI Engine (Flask_server/, port 5000)
 
 ```
 AI-Travel-Planner/
-├── android_app/              # Flutter 모바일 앱
+├── android_app/                      # Flutter 모바일 앱 ('오늘 충남')
 │   └── lib/
-│       ├── main.dart
-│       ├── api_service.dart          # API 호출 로직
-│       ├── travel_input_screen.dart  # 여행 조건 입력 화면
-│       └── travel_result_screen.dart # 추천 결과 화면
-├── NodeJs_server/            # Node.js API Gateway (port 8080)
-│   └── server.js
-├── Flask_server/             # Python AI 엔진 (port 5000)
-│   ├── app.py                # 메인 추천 알고리즘 + Flask 라우트
-│   ├── clustering_ai.py      # K-Means 군집화
-│   ├── recommendation_ai.py  # 가중치 랭킹 계산
-│   └── test_algorithm.py     # 알고리즘 단독 테스트
-└── Preprocess/               # 데이터 수집 및 전처리
+│       ├── main.dart                 # 앱 진입점, 하단 탭바 (추천 / 저장)
+│       ├── input_screen.dart         # 스팟·코스 추천 조건 입력 화면
+│       ├── spot_result_screen.dart   # 스팟 추천 결과 화면
+│       ├── course_result_screen.dart # 코스 추천 결과 화면
+│       ├── saved_screen.dart         # 저장된 스팟·코스 조회 화면
+│       ├── local_storage_service.dart# SharedPreferences 저장/조회/삭제
+│       └── api_service.dart          # HTTP API 호출 로직
+├── NodeJs_server/                    # Node.js API Gateway (port 8080)
+│   └── server.js                     # 요청 검증·포워딩, 카카오맵 URL 조회
+├── Flask_server/                     # Python AI 엔진 (port 5000)
+│   ├── app.py                        # Flask 라우트 + Claude API + 필터 로직
+│   ├── clustering_ai.py              # K-Means 군집화 (Silhouette Score 기반)
+│   ├── recommendation_ai.py          # 가중치 랭킹·TSP·코스 생성
+│   ├── places.db                     # SQLite 장소 데이터베이스
+│   └── test_algorithm.py             # 알고리즘 단독 테스트
+└── Preprocess/                       # 데이터 수집 및 전처리
     ├── RunPreprocess/
-    │   ├── run_crawling.py       # Naver Map 크롤러 (멀티프로세스 5코어)
-    │   ├── data_pipeline.py      # 데이터 통합 파이프라인
-    │   └── ...
+    │   ├── run_crawling.py           # Naver Map 크롤러 (멀티프로세스)
+    │   ├── data_pipeline.py          # 데이터 통합·정제·SQLite 적재
+    │   ├── collect_blog_tags.py      # 네이버 블로그 해시태그 수집
+    │   ├── remove_duplicates.py      # 중복 장소 제거
+    │   └── clean_existing_data.py    # 기존 데이터 정제
     └── crawler/
         ├── crawler_core.py
-        ├── region_list.py        # 크롤링 대상 지역 목록
-        ├── categories.py         # 크롤링 대상 카테고리 목록
+        ├── region_list.py            # 크롤링 대상 지역 목록 (천안·아산)
+        ├── categories.py             # 크롤링 대상 카테고리 목록
         └── ...
 ```
 
@@ -122,43 +136,52 @@ cd android_app
 flutter pub get
 ```
 
----
-
-### Node.js API Gateway 실행
-```bash
-cd NodeJs_server
-node server.js
+**환경 변수 (`.env`):**
+```
+ANTHROPIC_API_KEY=...    # Claude API 키
+KAKAO_REST_API_KEY=...   # 카카오맵 REST API 키 (지오코딩·장소 URL 조회)
 ```
 
-### Flask AI 엔진 실행
+---
+
+### 서버 실행
+
 ```bash
+# Node.js API Gateway
+cd NodeJs_server
+node server.js
+
+# Flask AI 엔진
 cd Flask_server
 python app.py
 ```
 
 ### Flutter 앱 실행
+
 ```bash
 cd android_app
 flutter run
 ```
 
+> **참고:** `android_app/lib/api_service.dart`의 `baseUrl`이 `http://10.0.2.2:8080`으로 설정되어 있어 에뮬레이터 환경에서 동작합니다. 실기기 테스트 시 PC의 로컬 IP로 변경이 필요합니다.
+
+---
+
 ### 알고리즘 단독 테스트
+
 ```bash
 cd Flask_server
 python test_algorithm.py
 ```
 
----
+### 데이터 전처리 파이프라인
 
-### 데이터 전처리 파이프라인 실행
 ```bash
-# 전체 파이프라인 한 번에 실행
-python run_data_prep.py
-
-# 또는 단계별 실행
 cd Preprocess/RunPreprocess
-python run_crawling.py      # Naver Map 크롤링 (멀티프로세스, 5코어)
-python data_pipeline.py     # 데이터 통합 및 정제
+
+python run_crawling.py       # Naver Map 크롤링 (천안/아산/전체 선택)
+python collect_blog_tags.py  # 블로그 해시태그 수집
+python data_pipeline.py      # 데이터 통합·정제·SQLite 적재
 ```
 
 ---
@@ -166,7 +189,5 @@ python data_pipeline.py     # 데이터 통합 및 정제
 ## 8. 데이터
 
 - 원본 크롤링 데이터: `Preprocess/data/chungnam_data/` (gitignore 처리)
-- 전처리 완료 데이터: `Preprocess/data/processed/chungnam_places_filtered.csv`
-- 스키마: 장소명, 주소, 위도, 경도, 방문자 수, 블로그 리뷰 수, 카테고리, 지역
-
-> `.env` 파일에 Kakao API 키가 필요합니다 (지오코딩 용도).
+- 장소 데이터베이스: `Flask_server/places.db` (SQLite)
+- 스키마: 장소명, 주소, 위도, 경도, 방문자 수, 블로그 리뷰 수, 카테고리, 지역, 블로그 태그
