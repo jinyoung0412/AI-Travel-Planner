@@ -41,8 +41,8 @@ Flutter App (android_app/)
     ↓ HTTP POST
 Node.js API Gateway (NodeJs_server/, port 8080)
     → 요청 검증 후 Flask 서버로 전달 / 카카오맵 URL 직접 조회
-    ↓ HTTP POST (localhost:5000)
-Flask AI Engine (Flask_server/, port 5000)
+    ↓ HTTP POST (localhost:5001)
+Flask AI Engine (Flask_server/, port 5001)
     → Claude API 호출 (태그 제안 / 카테고리 추출 / 블로그 키워드 확장)
     → 반경 필터 → 카테고리·블로그 태그 필터 → K-Means 군집화
     → 가중치 랭킹 + Greedy TSP 동선 정렬
@@ -92,7 +92,7 @@ AI-Travel-Planner/
 │       └── api_service.dart          # HTTP API 호출 로직
 ├── NodeJs_server/                    # Node.js API Gateway (port 8080)
 │   └── server.js                     # 요청 검증·포워딩, 카카오맵 URL 조회
-├── Flask_server/                     # Python AI 엔진 (port 5000)
+├── Flask_server/                     # Python AI 엔진 (port 5001)
 │   ├── app.py                        # Flask 라우트 + Claude API + 필터 로직
 │   ├── clustering_ai.py              # K-Means 군집화 (Silhouette Score 기반)
 │   ├── recommendation_ai.py          # 가중치 랭킹·TSP·코스 생성
