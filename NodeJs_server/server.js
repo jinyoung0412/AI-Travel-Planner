@@ -7,7 +7,7 @@ const app = express();
 app.use(express.json());
 app.use(cors());
 
-const FLASK = 'http://127.0.0.1:5000';
+const FLASK = 'http://127.0.0.1:5001';
 
 async function forwardToFlask(req, res, path) {
     try {
