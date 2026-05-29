@@ -70,6 +70,12 @@ def extract_name_element(item):
         return None, ""
 
 def parse_detail_page(driver):
+    """
+    장소 상세 정보 페이지(entryIframe)에서 카테고리·주소·리뷰 수를 추출한다.
+    네이버 지도는 CSS 클래스명이 수시로 갱신되므로,
+    각 항목마다 복수의 클래스 후보를 순차 탐색해 누락을 최소화한다.
+    """
+    # ── 상세 정보 iframe(entryIframe) 진입 ─────────────────────────
     driver.switch_to.default_content()
     try:
         WebDriverWait(driver, 2).until(
@@ -78,34 +84,40 @@ def parse_detail_page(driver):
     except:
         return "", "", 0, 0, "시간없음"
 
-    time.sleep(0.5)
+    time.sleep(0.5)  # iframe 내부 요소 렌더링 안정화 대기
 
+    # ── 카테고리 추출 (예: "한식", "카페") ────────────────────────
     cat = ""
     try:
+        # 두 가지 클래스 후보를 동시에 탐색 → UI 개편으로 클래스가 바뀌어도 대응 가능
         cat_els = driver.find_elements(By.CSS_SELECTOR, "span.lnJFt, span.DJJvD")
-        if cat_els: 
+        if cat_els:
             cat = cat_els[0].text.strip()
-    except: 
+    except:
         pass
 
+    # ── 주소 추출 ─────────────────────────────────────────────────
     addr = ""
     try:
         addr_els = driver.find_elements(By.CSS_SELECTOR, "span.LDgIH, div.vV_z_")
-        if addr_els: 
+        if addr_els:
             addr = addr_els[0].text.strip()
-    except: 
+    except:
         pass
 
+    # ── 방문자 리뷰 수 / 블로그 리뷰 수 추출 ──────────────────────
+    # 리뷰 수는 클래스 변동이 잦아 CSS 선택자 대신 페이지 본문 전체 텍스트에서
+    # 정규표현식으로 "방문자 리뷰 1,234" 형태 패턴을 매칭하는 방식이 더 안정적
     v, b = 0, 0
     try:
         body = driver.find_element(By.TAG_NAME, "body").text
         v_match = re.search(r"방문자 리뷰\s*([\d,]+)", body)
-        if v_match: 
+        if v_match:
             v = int(v_match.group(1).replace(",", ""))
         b_match = re.search(r"블로그 리뷰\s*([\d,]+)", body)
-        if b_match: 
+        if b_match:
             b = int(b_match.group(1).replace(",", ""))
-    except: 
+    except:
         pass
 
     op_time = "시간없음"
