@@ -50,13 +50,20 @@ def run_pipeline():
     
     final_output_file = os.path.join(output_dir, "chungnam_places_filtered.csv")
 
+    # ── 1. 원본 CSV 파일 전체 탐색 ────────────────────────────────
+    # 크롤링 단계에서 [지역 × 카테고리] 조합별로 분산 저장된 수십 개의 CSV를
+    # 하위 폴더 재귀 탐색(**)으로 한 번에 수집한다.
     search_pattern = os.path.join(input_base_path, "**", "*.csv")
     file_list = glob.glob(search_pattern, recursive=True)
-    
+
     if not file_list:
         print("크롤링된 원본 CSV 파일이 없습니다.")
         return
 
+    # ── 2. 파일별로 읽어 메타데이터 부착 후 리스트에 누적 ────────
+    # 각 CSV의 폴더명·파일명에서 지역·카테고리 정보를 역추출해
+    # 별도 컬럼(eup_myeon_dong, search_category)으로 추가한다.
+    # → 병합 후에도 출처 정보를 잃지 않고 후속 필터·검색에 활용 가능.
     all_data = []
     for file_path in file_list:
         try:
@@ -82,9 +89,15 @@ def run_pipeline():
         print("유효한 데이터가 없습니다.")
         return
 
+    # ── 3. 단일 DataFrame으로 통합 ────────────────────────────────
+    # pd.concat으로 모든 파일을 하나의 테이블로 결합. ignore_index=True로
+    # 인덱스를 새로 부여해 행 단위 처리(이터레이션·dropna 등)를 단순화한다.
     merged_df = pd.concat(all_data, ignore_index=True)
     print(f"병합 완료: 총 {len(merged_df)}행")
-    
+
+    # ── 4. 중복 행 제거 ───────────────────────────────────────────
+    # 동일 장소가 여러 검색어(카테고리)로 중복 크롤링된 경우를 제거.
+    # 가게명·주소 두 컬럼 조합을 키로 사용해, 가게명만 같은 별개 지점은 보존한다.
     if "가게명" in merged_df.columns and "주소" in merged_df.columns:
         before = len(merged_df)
         merged_df.drop_duplicates(subset=["가게명", "주소"], keep="first", inplace=True)
@@ -96,10 +109,15 @@ def run_pipeline():
         merged_df = merged_df[~merged_df['카테고리'].isin(EXCLUDE_CATEGORIES)].reset_index(drop=True)
         print(f"카테고리 필터: {before - len(merged_df)}개 제거됨")
     
+    # ── 6. 지오코딩 (주소 → 위도·경도 좌표 변환) ─────────────────
+    # 카카오 로컬 API의 주소 검색 엔드포인트를 활용해, 각 장소의 주소 문자열을
+    # 위도(y)·경도(x) 좌표로 변환한다. 좌표 정보는 이후 추천 알고리즘에서
+    # 사용자 위치와의 거리 계산·반경 필터링·군집화의 핵심 입력값이 된다.
     merged_df["latitude"] = None
     merged_df["longitude"] = None
-    
+
     def get_coords(addr):
+        """카카오 로컬 API를 호출해 주소 1건에 대한 좌표 튜플을 반환."""
         url = "https://dapi.kakao.com/v2/local/search/address.json"
         headers = {"Authorization": f"KakaoAK {KAKAO_API_KEY}"}
         params = {"query": addr}
@@ -107,10 +125,12 @@ def run_pipeline():
             r = requests.get(url, headers=headers, params=params)
             if r.status_code == 200:
                 data = r.json()
+                # documents[0] 의 x=경도, y=위도. 응답이 비어있는 경우는 변환 실패로 간주.
                 if data["documents"]:
                     return (float(data["documents"][0]["y"]), float(data["documents"][0]["x"]))
         except:
             pass
+        # 네트워크 오류·매칭 실패 모두 (None, None)으로 통일 처리 → 후속 dropna 단계에서 일괄 제거
         return (None, None)
 
     targets = merged_df.index
@@ -123,8 +143,12 @@ def run_pipeline():
         lat, lon = get_coords(str(addr))
         merged_df.loc[idx, "latitude"] = lat
         merged_df.loc[idx, "longitude"] = lon
+        # 카카오 API 호출 한도(초당 호출 제한) 대응 + 서버 부하 분산을 위한 짧은 지연
         time.sleep(0.02)
 
+    # ── 7. 좌표 변환 실패 항목 제거 ───────────────────────────────
+    # 주소 표기 오류·구주소 미지원 등으로 좌표 매칭에 실패한 행은
+    # 추천 알고리즘에서 사용 불가능하므로 데이터셋에서 일괄 제거한다.
     initial_count = len(merged_df)
     merged_df.dropna(subset=['latitude', 'longitude'], inplace=True)
     geocoded_count = len(merged_df)
