@@ -182,10 +182,16 @@ def derive_category_from_tags(persona_tags: list) -> list:
 
 
 # ── 반경 필터 ─────────────────────────────────────────────────
+# 이동 수단별 차등 반경. 대중교통은 도보·환승 부담을 고려해 좁게,
+# 승용차는 자유로운 이동을 반영해 넓게 설정.
 RADIUS_KM = {'차': 15.0, '대중교통': 4.5}
 
 
 def filter_radius(df: pd.DataFrame, lat: float, lng: float, transport: str) -> pd.DataFrame:
+    """
+    사용자 좌표를 중심으로 이동 수단별 반경 내 장소만 남기는 1차 필터.
+    각 장소와의 거리는 geopy의 측지 거리(geodesic)로 계산한다.
+    """
     r = RADIUS_KM.get(transport, 5.0)
     mask = df.apply(
         lambda row: geodesic((lat, lng), (row['latitude'], row['longitude'])).kilometers <= r,
@@ -196,6 +202,7 @@ def filter_radius(df: pd.DataFrame, lat: float, lng: float, transport: str) -> p
 
 # ── 키워드 필터 ───────────────────────────────────────────────
 def _tag_has_any(tags_json, keywords: list) -> bool:
+    """장소의 blog_tags(JSON 문자열) 키 중 하나라도 keywords에 포함되면 True."""
     if pd.isna(tags_json):
         return False
     try:
@@ -206,6 +213,14 @@ def _tag_has_any(tags_json, keywords: list) -> bool:
 
 
 def filter_keywords(df: pd.DataFrame, category_filters: list, blog_tag_keywords: list) -> pd.DataFrame:
+    """
+    카테고리 + 블로그 태그 키워드 두 조건을 AND로 결합하여 후보를 좁힌다.
+
+    - 카테고리: '카테고리' 또는 'search_category' 컬럼에 후보 키워드 중 하나라도 포함되면 통과 (OR)
+    - 블로그 태그: 장소별 수집된 블로그 태그에 사용자 키워드 중 하나라도 매칭되면 통과
+    - Fallback: 두 조건 모두 적용 시 결과가 3개 미만이면, 블로그 태그 조건을 완화하여
+      카테고리 조건만으로 재필터링 → 사용자 입력이 너무 좁아 후보가 사라지는 상황을 방지
+    """
     if category_filters:
         pat = '|'.join(category_filters)
         cat_mask = (
@@ -221,6 +236,7 @@ def filter_keywords(df: pd.DataFrame, category_filters: list, blog_tag_keywords:
         tag_mask = pd.Series(True, index=df.index)
 
     result = df[cat_mask & tag_mask]
+    # 결과가 너무 적으면 태그 조건 완화 (카테고리만 만족하는 후보까지 허용)
     if len(result) < 3 and blog_tag_keywords:
         result = df[cat_mask]
     return result.copy()
