@@ -6,16 +6,28 @@ from geopy.distance import geodesic
 # ── 스코어링 ──────────────────────────────────────────────────
 def add_scores(df: pd.DataFrame, blog_tag_keywords: list) -> pd.DataFrame:
     """
-    최종점수 = 0.4 × 인기도_norm + 0.6 × 태그_매칭_점수
-    인기도: log(방문자수 + 블로그수×0.3 + 1) Min-Max 정규화
-    태그매칭: blog_tag_keywords 중 블로그 태그에 포함된 비율
+    인기도와 태그 매칭도를 정규화·가중합하여 각 장소의 최종 추천 점수를 산출한다.
+
+        score = 0.15 × pop_score + 0.85 × tag_score
+
+    - pop_score : 인기도. log(방문자수 + 블로그수×0.3 + 1) 변환 후 Min-Max 정규화.
+                  로그 변환은 인기 장소에 점수가 극단적으로 쏠리는 멱법칙 분포를 완화하여,
+                  중간 인기도 장소도 의미있는 점수 차이를 갖도록 보정한다.
+    - tag_score : 사용자 키워드 중 해당 장소의 블로그 태그에 매칭된 토큰의 비율 (0~1).
+    - 가중치 비율(0.15 : 0.85)은 "많이 가는 곳"보다 "내 취향에 맞는 곳"을 우선 추천한다는
+      본 시스템의 추천 철학을 반영한 것이다.
     """
     df = df.copy()
 
+    # ── 인기도 점수 (pop_score) ───────────────────────────────
+    # +1은 log(0) 방지용. 0.3은 블로그수의 비중을 방문자수보다 낮게 둔 경험적 가중치.
     raw = (df['방문자수'].fillna(0) + df['블로그수'].fillna(0) * 0.3 + 1).apply(math.log)
     mn, mx = raw.min(), raw.max()
     df['pop_score'] = ((raw - mn) / (mx - mn)).clip(0, 1) if mx > mn else 0.0
 
+    # ── 태그 매칭 점수 (tag_score) ────────────────────────────
+    # 사용자 키워드를 공백 기준으로 토큰 단위 분해 후, 각 토큰이 블로그 태그에 등장하는지 확인.
+    # 매칭된 토큰 수 / 전체 토큰 수 비율을 점수로 사용 → 키워드가 많을수록 부분 매칭 허용.
     if blog_tag_keywords:
         tokens = list({tok for kw in blog_tag_keywords for tok in kw.split()})
         def _match(tags_json):
@@ -30,21 +42,32 @@ def add_scores(df: pd.DataFrame, blog_tag_keywords: list) -> pd.DataFrame:
     else:
         df['tag_score'] = 0.0
 
+    # ── 최종 점수 (가중합) ────────────────────────────────────
     df['score'] = 0.15 * df['pop_score'] + 0.85 * df['tag_score']
     return df
 
 
 # ── Greedy TSP ────────────────────────────────────────────────
 def greedy_tsp(records: list, start: tuple) -> list:
-    """출발점(start)에서 nearest-neighbor로 방문 순서 결정."""
+    """
+    탐욕 알고리즘 기반 nearest-neighbor 방식으로 방문 순서를 결정한다.
+
+    출발점(start)에서 시작해, 매 단계마다 미방문 장소 중 현재 위치에서
+    측지 거리가 가장 짧은 장소를 다음 목적지로 선택한다.
+
+    엄밀한 외판원 문제(TSP)는 NP-hard이지만, 추천 결과의 장소 수가 5개 내외로 적기 때문에
+    탐욕적 nearest-neighbor 방식으로도 실용적인 동선을 충분히 산출할 수 있다.
+    """
     route, current, remaining = [], start, list(records)
     while remaining:
+        # 현재 위치에서 가장 가까운 미방문 장소 선택
         nearest = min(
             remaining,
             key=lambda p: geodesic(current, (p['latitude'], p['longitude'])).kilometers,
         )
         route.append(nearest)
         remaining.remove(nearest)
+        # 다음 반복은 방금 방문한 장소를 기준점으로
         current = (nearest['latitude'], nearest['longitude'])
     return route
 
