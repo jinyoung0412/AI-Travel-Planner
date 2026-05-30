@@ -42,6 +42,12 @@ PAGE_DELAY   = 0.2  # 페이지 요청 간격 (초)
 
 
 def search_blog_urls(place_name: str, display: int = N_POSTS) -> list[str]:
+    """
+    네이버 검색 API로 '{장소명} 후기' 검색 → 네이버 블로그 URL 목록을 반환.
+    - '후기'를 함께 질의해 실제 방문자 리뷰 게시물 위주로 수집한다.
+    - sort='sim' (정확도순)으로 관련성 높은 게시물을 우선 확보.
+    - 외부 블로그 플랫폼(티스토리 등)은 태그 구조가 달라 제외, blog.naver.com만 사용.
+    """
     try:
         resp = requests.get(
             BLOG_SEARCH_URL,
@@ -61,6 +67,19 @@ def search_blog_urls(place_name: str, display: int = N_POSTS) -> list[str]:
 
 
 def fetch_tags(blog_url: str) -> list[str]:
+    """
+    개별 블로그 게시물 HTML에서 작성자가 등록한 해시태그 목록을 추출.
+
+    핵심 기법 2가지:
+    1) 모바일 페이지(m.blog.naver.com) 사용:
+       - PC 페이지는 본문이 iframe + 동적 렌더링으로 감싸여 있어 정적 파싱이 어렵다.
+       - 모바일 페이지는 HTML 본문에 태그 정보가 그대로 노출되어 단일 HTTP 요청만으로 파싱 가능.
+       - 모바일 User-Agent를 함께 위장해야 정상 응답을 받을 수 있음.
+    2) 정규표현식 기반 직접 추출:
+       - 네이버 블로그는 HTML 본문에 `var gsTagName = "태그1,태그2,..."` 형태의
+         JavaScript 변수로 태그 목록을 노출한다.
+       - 이 변수의 값만 정규식으로 추출 후 쉼표 분리하면 태그 리스트 확보 완료.
+    """
     mobile = blog_url.replace('blog.naver.com', 'm.blog.naver.com')
     try:
         page = requests.get(mobile, headers=PAGE_HEADERS, timeout=8)
@@ -73,7 +92,14 @@ def fetch_tags(blog_url: str) -> list[str]:
 
 
 def collect_place_tags(place_name: str, post_bar: tqdm) -> str:
-    """태그 빈도를 JSON 문자열로 반환 (상위 MAX_TAGS개)."""
+    """
+    한 장소에 대한 블로그 게시물들로부터 태그를 종합 수집해 JSON 형태로 반환.
+
+    절차:
+    1) search_blog_urls: 장소명으로 관련 블로그 URL 확보
+    2) fetch_tags: 각 URL에서 태그 추출
+    3) 수집된 태그를 후속 매칭 처리에 적합한 형태로 정제하여 반환
+    """
     urls = search_blog_urls(place_name)
     all_tags: dict[str, int] = {}
     post_bar.reset(total=len(urls))
@@ -83,8 +109,9 @@ def collect_place_tags(place_name: str, post_bar: tqdm) -> str:
         for t in tags:
             all_tags[t] = all_tags.get(t, 0) + 1
         post_bar.update(1)
-        time.sleep(PAGE_DELAY)
+        time.sleep(PAGE_DELAY)  # 블로그 페이지 연속 요청 시 차단 방지를 위한 지연
 
+    # 후속 매칭 처리에 사용할 형태로 정제
     sorted_tags = sorted(all_tags.items(), key=lambda x: -x[1])[:MAX_TAGS]
     return json.dumps({t: c for t, c in sorted_tags}, ensure_ascii=False)
 
