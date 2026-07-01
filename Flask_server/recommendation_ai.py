@@ -174,35 +174,45 @@ SLOT_CATEGORY_MAP = {
 
 def generate_from_slots(df, slot_types, blog_tag_keywords, filter_fn, n: int = 3):
     """
-    사용자 정의 슬롯 순서로 코스 생성.
-    각 슬롯 타입 → SLOT_CATEGORY_MAP 카테고리로 장소 탐색.
-    블로그 키워드는 각 슬롯에서 스코어링 보조에만 사용.
+    사용자 정의 슬롯 순서대로 코스를 생성한다 (코스 추천 모드 ①).
+
+    예) slot_types = ['음식', '카페', '자연·산책'] →
+        음식 카테고리 1곳 → 카페 1곳 → 자연·산책 1곳 순으로 코스 구성.
+
+    설계 핵심:
+    - 군집 우선 탐색: 각 코스는 가급적 단일 군집(Cluster) 내에서만 구성하여 지리적 응집성 확보.
+      군집 안에서 적합한 장소가 없으면 전체 후보에서 fallback 탐색.
+    - 코스 내·코스 간 장소 중복 방지: used_names(코스 내) + globally_used(코스 간) 두 단계로 추적.
+    - 슬롯별 SLOT_CATEGORY_MAP을 통해 사용자의 한국어 슬롯명을 DB 카테고리 키워드로 매핑.
     """
     if not slot_types:
         return []
 
     cluster_col = 'Cluster' if 'Cluster' in df.columns else None
+    # 군집화가 적용된 경우, 장소가 많은 군집부터 순회하여 후보 풍부도 확보
     cluster_ids = df[cluster_col].value_counts().index.tolist() if cluster_col else [None] * n
 
     courses = []
-    globally_used = set()
+    globally_used = set()  # 이미 다른 코스에서 선택된 장소 (코스 간 중복 방지)
 
     for i, cid in enumerate(cluster_ids):
         if len(courses) >= n:
             break
 
         c_df = df[df[cluster_col] == cid] if cid is not None else df
-        used_names = set(globally_used)
+        used_names = set(globally_used)  # 이 코스 내에서 사용된 장소 (코스 내 중복 방지)
         course = []
         ok = True
 
         for slot in slot_types:
             cats = SLOT_CATEGORY_MAP.get(slot, [])
+            # 1차: 현재 군집 내 탐색
             place = _pick_best(c_df, cats, blog_tag_keywords, filter_fn, used_names)
+            # 2차 fallback: 군집 내 없으면 전체 후보에서 탐색
             if place is None:
                 place = _pick_best(df, cats, blog_tag_keywords, filter_fn, used_names)
             if place is None:
-                ok = False
+                ok = False  # 한 슬롯이라도 후보를 못 찾으면 이 코스 폐기
                 break
             course.append(place)
             used_names.add(place['가게명'])
@@ -216,10 +226,21 @@ def generate_from_slots(df, slot_types, blog_tag_keywords, filter_fn, n: int = 3
 
 def generate_fixed_courses(df, blog_tag_keywords, filter_fn, n: int = 3, spots: int = 5):
     """
-    Cluster-aware 템플릿 코스 생성. spots 파라미터로 코스당 스팟 수 조절.
-    - 3 stops: 음식 → 활동 → 카페
-    - 4 stops: 음식 → 활동 → 카페 → 활동
-    - 5 stops: 음식 → 활동 → 카페 → 활동 → 음식
+    표준 당일 여행 패턴 기반 고정 템플릿 코스 생성 (코스 추천 모드 ②).
+
+    사용자가 슬롯 순서를 직접 지정하지 않은 경우 자동 적용되는 모드.
+    spots 파라미터로 코스 길이를 조절:
+        - 3 stops: 음식 → 활동 → 카페
+        - 4 stops: 음식 → 활동 → 카페 → 활동
+        - 5 stops: 음식 → 활동 → 카페 → 활동 → 음식 (점심·저녁 + 카페)
+
+    설계 핵심:
+    - 군집 우선 + 전체 fallback: generate_from_slots와 동일한 패턴.
+    - 활동 그룹 다양성: 한 코스 내 두 활동 슬롯(stop2·stop4)이 서로 다른 활동 그룹에서 선택되도록
+      _COURSE_ACT_PAIRS로 사전 정의된 페어를 사용. 또한 코스마다 다른 페어를 할당하여
+      여러 코스가 모두 같은 패턴이 되는 단조로움을 방지.
+    - 음식 카테고리 중복 방지: 두 음식 슬롯(stop1·stop5)이 같은 한식·중식 같은 동일 대분류로
+      겹치지 않도록 used_food_cats로 추적하여 두 번째 음식 선택 시 제외.
     """
     cluster_col = 'Cluster' if 'Cluster' in df.columns else None
 
@@ -229,19 +250,21 @@ def generate_fixed_courses(df, blog_tag_keywords, filter_fn, n: int = 3, spots: 
         cluster_ids = [None] * n
 
     courses = []
-    globally_used = set()
+    globally_used = set()  # 코스 간 장소 중복 방지
 
     for i, cid in enumerate(cluster_ids):
         if len(courses) >= n or i >= len(_COURSE_ACT_PAIRS):
             break
 
+        # 코스마다 다른 활동 그룹 페어 할당 → 여러 코스의 활동 다양성 확보
         act_idx1, act_idx2 = _COURSE_ACT_PAIRS[i]
         c_df = df[df[cluster_col] == cid] if cid is not None else df
         used_names = set(globally_used)
-        used_food_cats: set = set()
+        used_food_cats: set = set()  # 이 코스에서 이미 사용된 음식 대분류 (중복 방지용)
         course = []
 
         def pick(cats, tags, _c=c_df, _full=df, _used=used_names):
+            """군집 내 우선 탐색 → 실패 시 전체 후보로 fallback."""
             r = _pick_best(_c, cats, tags, filter_fn, _used)
             if r is None:
                 r = _pick_best(_full, cats, tags, filter_fn, _used)
@@ -253,10 +276,11 @@ def generate_fixed_courses(df, blog_tag_keywords, filter_fn, n: int = 3, spots: 
             continue
         course.append(food1)
         used_names.add(food1['가게명'])
-        used_food_cats.update(_matched_food_cats(food1))
+        used_food_cats.update(_matched_food_cats(food1))  # Stop 5에서 동일 카테고리 회피용
 
-        # Stop 2: 활동 (그룹 act_idx1)
+        # Stop 2: 활동 (할당된 첫 번째 활동 그룹)
         act1 = pick(_ACTIVITY_GROUPS[act_idx1], blog_tag_keywords)
+        # 1차 그룹에 후보가 없으면 다른 그룹에서 fallback 탐색
         if act1 is None:
             for g in _ACTIVITY_GROUPS:
                 if g is not _ACTIVITY_GROUPS[act_idx1]:
@@ -280,8 +304,9 @@ def generate_fixed_courses(df, blog_tag_keywords, filter_fn, n: int = 3, spots: 
             globally_used.update(p['가게명'] for p in course)
             continue
 
-        # Stop 4: 활동 (그룹 act_idx2, stop2와 다른 그룹)
+        # Stop 4: 활동 (할당된 두 번째 활동 그룹, Stop 2와 다른 그룹)
         act2 = pick(_ACTIVITY_GROUPS[act_idx2], blog_tag_keywords)
+        # fallback 시에도 Stop 2와 Stop 4가 동일 그룹이 되는 것을 회피
         if act2 is None:
             for g in _ACTIVITY_GROUPS:
                 if g is not _ACTIVITY_GROUPS[act_idx1] and g is not _ACTIVITY_GROUPS[act_idx2]:
@@ -298,7 +323,9 @@ def generate_fixed_courses(df, blog_tag_keywords, filter_fn, n: int = 3, spots: 
             globally_used.update(p['가게명'] for p in course)
             continue
 
-        # Stop 5: 음식점 (stop1과 다른 카테고리)
+        # Stop 5: 음식점 (Stop 1과 다른 음식 카테고리에서 선택)
+        # used_food_cats(이미 사용된 음식 대분류)를 제외한 후보군으로 탐색.
+        # 모든 카테고리가 사용된 극단적 경우에만 전체 FOOD_CATS로 fallback.
         remaining_food = [c for c in FOOD_CATS if c not in used_food_cats]
         food2 = pick(remaining_food or FOOD_CATS, blog_tag_keywords)
         if food2 is None:

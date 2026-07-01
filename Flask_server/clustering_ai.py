@@ -38,6 +38,19 @@ def find_optimal_clusters(coords, max_k):
     return best_k
 
 def perform_clustering(df, transport='대중교통'):
+    """
+    반경 내 후보 장소들을 지리적으로 군집화하여 'Cluster' 컬럼을 추가한다.
+
+    코스 추천의 핵심 전제 — "한 코스 안의 장소들은 지리적으로 가까워야 한다" —
+    를 충족시키기 위한 사전 단계. 군집화된 결과를 받은 코스 생성 단계에서는
+    동일 군집 내 장소들만으로 한 코스를 구성한다.
+
+    이동 수단에 따라 탐색 범위(max_k)를 차등 적용:
+    - 대중교통: 더 작은 max_k → 군집을 더 좁게 → 코스 내 이동 거리 단축
+    - 승용차: 더 넓은 max_k → 군집을 더 넓게 → 다양한 장소 조합 가능
+
+    데이터가 5개 미만이면 의미 있는 군집화가 불가능하므로 생략하고 원본 반환.
+    """
     total_places = len(df)
 
     if total_places < 5:
@@ -45,13 +58,13 @@ def perform_clustering(df, transport='대중교통'):
         return df
 
     # 탐색할 최대 군집 수: 데이터 수의 제곱근 (경험적 상한선)
-    # 이동수단에 따라 탐색 범위를 조정 (승용차는 더 넓은 범위 허용)
+    # 대중교통은 //3으로 더 좁게 제한 → 한 군집의 지리적 범위가 도보 이동 가능 수준으로 축소
     if transport == '대중교통':
         max_k = max(2, int(total_places ** 0.5) // 3)
     else:
         max_k = max(2, int(total_places ** 0.5))
 
-    # 코스 구성 가능성을 위해 군집당 최소 장소 수 보장 (상한선 15)
+    # 코스 구성 가능성 보장 (군집당 최소 장소 확보) + 절대 상한선 15
     max_k = min(max_k, total_places - 1, 15)
 
     print(f"[군집화 모듈] 데이터 {total_places}개 대상, 이동수단 '{transport}' 고려하여 최적 군집 수 탐색 (최대 k={max_k})")
