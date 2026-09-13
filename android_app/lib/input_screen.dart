@@ -100,7 +100,7 @@ class _InputScreenState extends State<InputScreen> {
   String  _transport = '대중교통';
   String? _selectedHub;
   int     _resultCount = 5;
-  int     _spotCount   = 5;
+  int     _spotCount   = 3;
   List<String> _slotTypes = [];
   bool    _isLoading    = false;
   bool    _isTagLoading = false;
@@ -234,6 +234,9 @@ class _InputScreenState extends State<InputScreen> {
     }
   }
 
+  bool _isInServiceArea(double lat, double lng) =>
+      lat >= 36.55 && lat <= 37.05 && lng >= 126.80 && lng <= 127.35;
+
   Future<void> _submit() async {
     final whoTags = _kTagGroups['누구와']!.toSet();
     if (!_selectedTags.any(whoTags.contains)) {
@@ -261,6 +264,38 @@ class _InputScreenState extends State<InputScreen> {
       return;
     }
 
+    // 서비스 영역 검증 및 좌표 결정
+    double? effectiveLat = _effectiveLat;
+    double? effectiveLng = _effectiveLng;
+    if (_region == '내 주변' && effectiveLat != null && effectiveLng != null) {
+      if (!_isInServiceArea(effectiveLat, effectiveLng)) {
+        if (!mounted) return;
+        final proceed = await showDialog<bool>(
+          context: context,
+          builder: (_) => AlertDialog(
+            title: const Text('서비스 지역 안내'),
+            content: const Text(
+              '현재 위치가 서비스 지역(천안·아산)을 벗어났습니다.\n'
+              '천안 중심부 기준으로 추천을 받으시겠습니까?',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('취소'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('천안으로 추천'),
+              ),
+            ],
+          ),
+        );
+        if (!mounted || proceed != true) return;
+        effectiveLat = 36.8151;
+        effectiveLng = 127.1139;
+      }
+    }
+
     setState(() => _isLoading = true);
     try {
       final tags = _selectedTags.toList();
@@ -271,8 +306,8 @@ class _InputScreenState extends State<InputScreen> {
           userText: _textController.text.trim(),
           transport: _transport,
           region: _region,
-          userLat: _effectiveLat!,
-          userLng: _effectiveLng!,
+          userLat: effectiveLat!,
+          userLng: effectiveLng!,
           personaTags: tags,
           count: _resultCount,
         );
@@ -280,8 +315,8 @@ class _InputScreenState extends State<InputScreen> {
         res = await ApiService.getCourseRecommendation(
           transport: _transport,
           region: _region,
-          userLat: _effectiveLat!,
-          userLng: _effectiveLng!,
+          userLat: effectiveLat!,
+          userLng: effectiveLng!,
           personaTags: tags,
           count: _resultCount,
           spotCount: _spotCount,

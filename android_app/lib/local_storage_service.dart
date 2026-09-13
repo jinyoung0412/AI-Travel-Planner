@@ -40,12 +40,52 @@ class LocalStorageService {
     return List<Map<String, dynamic>>.from(jsonDecode(raw));
   }
 
+  static String _courseId(List<Map<String, dynamic>> spots) =>
+      spots.map((s) => s['name'] ?? '').join('|');
+
   static Future<void> saveCourse(String region, List<Map<String, dynamic>> spots) async {
     final courses = await getSavedCourses();
+    final id = _courseId(spots);
+    // 중복 저장 방지
+    courses.removeWhere((c) {
+      try {
+        return _courseId(List<Map<String, dynamic>>.from(c['spots'] as List)) == id;
+      } catch (_) {
+        return false;
+      }
+    });
     courses.insert(0, {
       'region': region,
       'spots': spots,
       'created_at': DateTime.now().toIso8601String(),
+    });
+    // 최대 100개 유지 (LRU)
+    if (courses.length > 100) courses.removeRange(100, courses.length);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_coursesKey, jsonEncode(courses));
+  }
+
+  static Future<bool> isCourseSaved(List<Map<String, dynamic>> spots) async {
+    final id = _courseId(spots);
+    final courses = await getSavedCourses();
+    return courses.any((c) {
+      try {
+        return _courseId(List<Map<String, dynamic>>.from(c['spots'] as List)) == id;
+      } catch (_) {
+        return false;
+      }
+    });
+  }
+
+  static Future<void> removeCourseBySpots(List<Map<String, dynamic>> spots) async {
+    final id = _courseId(spots);
+    final courses = await getSavedCourses();
+    courses.removeWhere((c) {
+      try {
+        return _courseId(List<Map<String, dynamic>>.from(c['spots'] as List)) == id;
+      } catch (_) {
+        return false;
+      }
     });
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_coursesKey, jsonEncode(courses));

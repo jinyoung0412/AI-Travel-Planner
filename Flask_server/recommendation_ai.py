@@ -1,4 +1,5 @@
 import json, math
+import numpy as np
 import pandas as pd
 from geopy.distance import geodesic
 
@@ -142,7 +143,7 @@ _ACTIVITY_GROUPS = [
 _COURSE_ACT_PAIRS = [(0, 2), (1, 3), (4, 0), (3, 4), (2, 1)]
 
 
-def _pick_best(df, category_filters, blog_tag_keywords, filter_fn, used_names):
+def _pick_best(df, category_filters, blog_tag_keywords, filter_fn, used_names, top_k: int = 5):
     cands = filter_fn(df, category_filters, blog_tag_keywords)
     cands = add_scores(cands, blog_tag_keywords)
     cands = cands[~cands['가게명'].isin(used_names)]
@@ -152,7 +153,17 @@ def _pick_best(df, category_filters, blog_tag_keywords, filter_fn, used_names):
         cands = cands[~cands['가게명'].isin(used_names)]
     if cands.empty:
         return None
-    return cands.nlargest(1, 'score').iloc[0].to_dict()
+    # 상위 top_k 중 score 기반 softmax 가중치 샘플링 → 동일 입력에서 다양한 결과 제공
+    top = cands.nlargest(min(top_k, len(cands)), 'score').reset_index(drop=True)
+    if len(top) == 1:
+        return top.iloc[0].to_dict()
+    scores = top['score'].to_numpy(dtype=float)
+    temperature = 0.4  # 낮을수록 top-1에 가까워짐, 높을수록 균등 분포
+    logits = (scores - scores.max()) / temperature
+    probs = np.exp(logits)
+    probs /= probs.sum()
+    idx = int(np.random.choice(len(top), p=probs))
+    return top.iloc[idx].to_dict()
 
 
 def _matched_food_cats(place: dict) -> set:

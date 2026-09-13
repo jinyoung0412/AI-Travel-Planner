@@ -1,4 +1,4 @@
-import os, json, logging, sqlite3
+import os, json, logging, sqlite3, time
 from datetime import datetime
 import anthropic
 import pandas as pd
@@ -92,19 +92,30 @@ TAG_BLOG_SYSTEM = """\
 JSON만 반환. 형식: {"blog_tag_keywords": [...]}"""
 
 
-def _call_claude(system: str, user_msg: str, max_tokens: int = 512) -> dict:
-    resp = _claude.messages.create(
-        model=MODEL,
-        max_tokens=max_tokens,
-        system=system,
-        messages=[{"role": "user", "content": user_msg}],
-    )
-    text = resp.content[0].text.strip()
-    if '```' in text:
-        text = text.split('```')[1]
-        if text.startswith('json'):
-            text = text[4:]
-    return json.loads(text.strip())
+def _call_claude(system: str, user_msg: str, max_tokens: int = 512, max_retries: int = 3) -> dict:
+    delay = 0.8
+    last_exc: Exception | None = None
+    for attempt in range(max_retries):
+        try:
+            resp = _claude.messages.create(
+                model=MODEL,
+                max_tokens=max_tokens,
+                system=system,
+                messages=[{"role": "user", "content": user_msg}],
+            )
+            text = resp.content[0].text.strip()
+            if '```' in text:
+                text = text.split('```')[1]
+                if text.startswith('json'):
+                    text = text[4:]
+            return json.loads(text.strip())
+        except Exception as e:
+            last_exc = e
+            if attempt < max_retries - 1:
+                log.warning(f"Claude 호출 실패 (시도 {attempt + 1}/{max_retries}): {e}")
+                time.sleep(delay)
+                delay *= 2
+    raise last_exc  # type: ignore[misc]
 
 
 def extract_spot_category(user_text: str) -> list:
@@ -185,6 +196,14 @@ def derive_category_from_tags(persona_tags: list) -> list:
 # 이동 수단별 차등 반경. 대중교통은 도보·환승 부담을 고려해 좁게,
 # 승용차는 자유로운 이동을 반영해 넓게 설정.
 RADIUS_KM = {'차': 15.0, '대중교통': 4.5}
+
+# ── 서비스 영역 경계 (천안·아산 포함 충남 지역) ──────────────────
+_SERVICE_LAT = (36.55, 37.05)
+_SERVICE_LNG = (126.80, 127.35)
+
+def _in_service_area(lat: float, lng: float) -> bool:
+    return (_SERVICE_LAT[0] <= lat <= _SERVICE_LAT[1] and
+            _SERVICE_LNG[0] <= lng <= _SERVICE_LNG[1])
 
 
 def filter_radius(df: pd.DataFrame, lat: float, lng: float, transport: str) -> pd.DataFrame:
@@ -286,6 +305,9 @@ def recommend_spot():
         persona_tags = data.get('persona_tags', [])
         count        = max(1, min(int(data.get('count', 5)), 20))
 
+        if not _in_service_area(user_lat, user_lng):
+            return jsonify({'error': '서비스 지역(천안·아산)을 벗어난 위치입니다. 지역을 천안 또는 아산으로 선택해주세요.'}), 422
+
         log.info(f"[spot] region={region} | text={user_text!r} | tags={persona_tags} | count={count}")
 
         # Claude 호출 #1: 텍스트 → 카테고리 필터
@@ -339,7 +361,10 @@ def recommend_course():
         user_lng     = float(data['user_lng'])
         persona_tags = data.get('persona_tags', [])
         count        = max(1, min(int(data.get('count', 3)), 5))
-        spot_count   = max(3, min(int(data.get('spot_count', 5)), 5))
+        spot_count   = max(3, min(int(data.get('spot_count', 3)), 5))
+
+        if not _in_service_area(user_lat, user_lng):
+            return jsonify({'error': '서비스 지역(천안·아산)을 벗어난 위치입니다. 지역을 천안 또는 아산으로 선택해주세요.'}), 422
 
         log.info(f"[course] region={region} | tags={persona_tags} | count={count} | spots={spot_count}")
 
@@ -352,7 +377,16 @@ def recommend_course():
             return jsonify({'error': '반경 내 장소가 너무 적습니다.'}), 404
 
         clustered_df = perform_clustering(radius_df, transport)
-        slot_types = data.get('slot_types', [])
+        slot_types = data.get('slot_types', []) or []
+        # slot_types 길이와 spot_count 정합성 강제: 클라이언트가 보낸 slot_types를 spot_count에 맞게 조정
+        if slot_types and len(slot_types) != spot_count:
+            if len(slot_types) > spot_count:
+                slot_types = slot_types[:spot_count]
+            else:
+                _default_pool = ['음식', '자연·산책', '카페', '문화·역사', '음식']
+                while len(slot_types) < spot_count:
+                    slot_types.append(_default_pool[len(slot_types) % len(_default_pool)])
+            log.warning(f"[course] slot_types 길이 조정 → {slot_types}")
         if slot_types:
             courses = generate_from_slots(clustered_df, slot_types, tag_f, filter_keywords, n=count)
         else:
