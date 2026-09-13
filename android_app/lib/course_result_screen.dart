@@ -22,6 +22,30 @@ class _CourseResultScreenState extends State<CourseResultScreen> {
   final PageController _pageController = PageController();
   int _currentPage = 0;
   final Set<int> _savedPages = {};
+  bool _isProcessing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkSavedStates();
+  }
+
+  Future<void> _checkSavedStates() async {
+    for (int i = 0; i < widget.courses.length; i++) {
+      final spots = widget.courses[i]
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .map((p) => {
+                'name': p['name'] ?? '',
+                'lat': p['lat'],
+                'lng': p['lng'],
+                'category': p['category'] ?? '',
+                'kakao_url': p['kakao_url'],
+              })
+          .toList();
+      final saved = await LocalStorageService.isCourseSaved(spots);
+      if (saved && mounted) setState(() => _savedPages.add(i));
+    }
+  }
 
   @override
   void dispose() {
@@ -29,24 +53,42 @@ class _CourseResultScreenState extends State<CourseResultScreen> {
     super.dispose();
   }
 
-  Future<void> _saveCourse(int pageIndex) async {
-    final course = widget.courses[pageIndex]
+  List<Map<String, dynamic>> _buildSpots(int pageIndex) {
+    return widget.courses[pageIndex]
         .map((e) => Map<String, dynamic>.from(e as Map))
+        .map((p) => {
+              'name': p['name'] ?? '',
+              'lat': p['lat'],
+              'lng': p['lng'],
+              'category': p['category'] ?? '',
+              'kakao_url': p['kakao_url'],
+            })
         .toList();
-    final spots = course.map((p) => {
-      'name': p['name'] ?? '',
-      'lat': p['lat'],
-      'lng': p['lng'],
-      'category': p['category'] ?? '',
-      'kakao_url': p['kakao_url'],
-    }).toList();
+  }
 
-    await LocalStorageService.saveCourse(widget.region, spots);
-    if (!mounted) return;
-    setState(() => _savedPages.add(pageIndex));
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('코스가 저장됐어요.')),
-    );
+  Future<void> _toggleSave(int pageIndex) async {
+    if (_isProcessing) return;
+    setState(() => _isProcessing = true);
+    try {
+      final spots = _buildSpots(pageIndex);
+      if (_savedPages.contains(pageIndex)) {
+        await LocalStorageService.removeCourseBySpots(spots);
+        if (!mounted) return;
+        setState(() => _savedPages.remove(pageIndex));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('저장이 취소됐어요.')),
+        );
+      } else {
+        await LocalStorageService.saveCourse(widget.region, spots);
+        if (!mounted) return;
+        setState(() => _savedPages.add(pageIndex));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('코스가 저장됐어요.')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isProcessing = false);
+    }
   }
 
   Future<void> _openKakaoMap(BuildContext context, Map<String, dynamic> place) async {
@@ -86,9 +128,7 @@ class _CourseResultScreenState extends State<CourseResultScreen> {
                   : Icons.bookmark_outline_rounded,
               color: const Color(0xFF26C6DA),
             ),
-            onPressed: _savedPages.contains(_currentPage)
-                ? null
-                : () => _saveCourse(_currentPage),
+            onPressed: _isProcessing ? null : () => _toggleSave(_currentPage),
           ),
         ],
       ),
