@@ -69,6 +69,11 @@ def extract_name_element(item):
     except:
         return None, ""
 
+def extract_provider_place_id(url):
+    match = re.search(r'/(?:place|restaurant|cafe|attraction)/(\d+)(?:/|\?|$)', url or '')
+    return match.group(1) if match else ''
+
+
 def parse_detail_page(driver):
     """
     장소 상세 정보 페이지(entryIframe)에서 카테고리·주소·리뷰 수를 추출한다.
@@ -77,12 +82,18 @@ def parse_detail_page(driver):
     """
     # ── 상세 정보 iframe(entryIframe) 진입 ─────────────────────────
     driver.switch_to.default_content()
+    provider_id = extract_provider_place_id(driver.current_url)
+    try:
+        frame = driver.find_element(By.ID, 'entryIframe')
+        provider_id = extract_provider_place_id(frame.get_attribute('src')) or provider_id
+    except Exception:
+        pass
     try:
         WebDriverWait(driver, 2).until(
             EC.frame_to_be_available_and_switch_to_it((By.ID, "entryIframe"))
         )
     except:
-        return "", "", 0, 0, "시간없음"
+        return "", "", 0, 0, "시간없음", provider_id
 
     time.sleep(0.5)  # iframe 내부 요소 렌더링 안정화 대기
 
@@ -179,4 +190,4 @@ def parse_detail_page(driver):
     # except Exception:
     #     op_time = "시간없음"
 
-    return cat, addr, v, b, op_time
+    return cat, addr, v, b, op_time, provider_id

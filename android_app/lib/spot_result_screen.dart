@@ -77,28 +77,21 @@ class _PlaceCardState extends State<_PlaceCard> {
   }
 
   Future<void> _checkSaved() async {
-    final saved = await LocalStorageService.isSpotSaved(widget.place['name'] ?? '');
+    final saved = await LocalStorageService.isSpotSaved(widget.place);
     if (mounted) setState(() => _saved = saved);
   }
 
   Future<void> _toggleSave() async {
     final p = widget.place;
-    final name = p['name'] ?? '';
     if (_saved) {
-      await LocalStorageService.deleteSpot(name);
+      await LocalStorageService.deleteSpot(p);
       if (!mounted) return;
       setState(() => _saved = false);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('저장이 취소됐어요.')),
       );
     } else {
-      await LocalStorageService.saveSpot({
-        'name': name,
-        'lat': p['lat'],
-        'lng': p['lng'],
-        'category': p['category'] ?? '',
-        'kakao_url': p['kakao_url'],
-      });
+      await LocalStorageService.saveSpot(p);
       if (!mounted) return;
       setState(() => _saved = true);
       ScaffoldMessenger.of(context).showSnackBar(
@@ -115,7 +108,7 @@ class _PlaceCardState extends State<_PlaceCard> {
       final lng  = (widget.place['lng']  as num).toDouble();
 
       final placeUrl = await ApiService.getKakaoPlaceUrl(
-        name: name, lat: lat, lng: lng,
+        name: name, lat: lat, lng: lng, address: widget.place['address'] ?? '',
       );
 
       if (!mounted) return;

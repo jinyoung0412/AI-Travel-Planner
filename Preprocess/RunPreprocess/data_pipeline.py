@@ -1,3 +1,7 @@
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from place_identity import ensure_ids
 import pandas as pd
 import glob
 import os
@@ -24,6 +28,22 @@ EXCLUDE_CATEGORIES = {
     '유흥주점', '단란주점',
     # 볼링장, 스크린야구장, 당구장, 수영장, 스케이트장 계열은 나들이 목적지로 유지
 }
+
+
+def get_coords(address, api_key):
+    """Address geocoding only, never a measured travel distance/time."""
+    try:
+        response = requests.get('https://dapi.kakao.com/v2/local/search/address.json',
+            headers={'Authorization': f'KakaoAK {api_key}'}, params={'query': address}, timeout=10)
+        response.raise_for_status()
+        docs = response.json().get('documents', [])
+        if docs:
+            lat, lng = float(docs[0]['y']), float(docs[0]['x'])
+            if -90 <= lat <= 90 and -180 <= lng <= 180:
+                return lat, lng
+    except (requests.RequestException, ValueError, TypeError, KeyError):
+        pass
+    return None, None
 
 
 def run_pipeline():
@@ -67,7 +87,7 @@ def run_pipeline():
     all_data = []
     for file_path in file_list:
         try:
-            df = pd.read_csv(file_path, encoding="utf-8-sig")
+            df = pd.read_csv(file_path, encoding="utf-8-sig", dtype={"provider_place_id": str, "place_id": str})
             if df.empty:
                 continue
 
@@ -97,10 +117,11 @@ def run_pipeline():
 
     # ── 4. 중복 행 제거 ───────────────────────────────────────────
     # 동일 장소가 여러 검색어(카테고리)로 중복 크롤링된 경우를 제거.
-    # 가게명·주소 두 컬럼 조합을 키로 사용해, 가게명만 같은 별개 지점은 보존한다.
+    # 공급자 ID 또는 정규화된 이름+주소 기반 ID로 동명 별개 지점을 보존한다.
     if "가게명" in merged_df.columns and "주소" in merged_df.columns:
         before = len(merged_df)
-        merged_df.drop_duplicates(subset=["가게명", "주소"], keep="first", inplace=True)
+        merged_df = merged_df[merged_df['주소'].notna() & merged_df['주소'].str.strip().ne('')]
+        merged_df = ensure_ids(merged_df).drop_duplicates('place_id', keep='last')
         removed = before - len(merged_df)
         print(f"중복 제거: {removed}개 제거됨")
 
@@ -116,23 +137,6 @@ def run_pipeline():
     merged_df["latitude"] = None
     merged_df["longitude"] = None
 
-    def get_coords(addr):
-        """카카오 로컬 API를 호출해 주소 1건에 대한 좌표 튜플을 반환."""
-        url = "https://dapi.kakao.com/v2/local/search/address.json"
-        headers = {"Authorization": f"KakaoAK {KAKAO_API_KEY}"}
-        params = {"query": addr}
-        try:
-            r = requests.get(url, headers=headers, params=params)
-            if r.status_code == 200:
-                data = r.json()
-                # documents[0] 의 x=경도, y=위도. 응답이 비어있는 경우는 변환 실패로 간주.
-                if data["documents"]:
-                    return (float(data["documents"][0]["y"]), float(data["documents"][0]["x"]))
-        except:
-            pass
-        # 네트워크 오류·매칭 실패 모두 (None, None)으로 통일 처리 → 후속 dropna 단계에서 일괄 제거
-        return (None, None)
-
     targets = merged_df.index
     print("지오코딩 연산 시작")
     for idx in tqdm(targets):
@@ -140,7 +144,7 @@ def run_pipeline():
         if pd.isna(addr) or str(addr).strip() == "":
             continue
 
-        lat, lon = get_coords(str(addr))
+        lat, lon = get_coords(str(addr), KAKAO_API_KEY)
         merged_df.loc[idx, "latitude"] = lat
         merged_df.loc[idx, "longitude"] = lon
         # 카카오 API 호출 한도(초당 호출 제한) 대응 + 서버 부하 분산을 위한 짧은 지연

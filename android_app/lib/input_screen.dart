@@ -352,6 +352,8 @@ class _InputScreenState extends State<InputScreen> {
             ),
             requestedCount: _resultCount,
             region: _region,
+            metadata: Map<String, dynamic>.from(data['metadata'] ?? {}),
+            courseMetrics: List<dynamic>.from(data['course_metrics'] ?? []),
           ),
         ));
       }
