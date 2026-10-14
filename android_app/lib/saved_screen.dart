@@ -30,7 +30,8 @@ class SavedScreenState extends State<SavedScreen> with SingleTickerProviderState
     if (mounted) setState(() { _spots = spots; _courses = courses; _loading = false; });
   }
 
-  Future<void> _deleteSpot(String name) async {
+  Future<void> _deleteSpot(Map<String, dynamic> spot) async {
+    final name = spot['name'] ?? '';
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
@@ -46,8 +47,8 @@ class SavedScreenState extends State<SavedScreen> with SingleTickerProviderState
       ),
     );
     if (ok != true) return;
-    await LocalStorageService.deleteSpot(name);
-    setState(() => _spots.removeWhere((s) => s['name'] == name));
+    await LocalStorageService.deleteSpot(spot);
+    setState(() => _spots.removeWhere((s) => LocalStorageService.samePlace(s, spot)));
   }
 
   Future<void> _deleteCourse(int index) async {
@@ -144,7 +145,7 @@ class SavedScreenState extends State<SavedScreen> with SingleTickerProviderState
       itemCount: _spots.length,
       itemBuilder: (_, i) => _SpotCard(
         spot: _spots[i],
-        onDelete: () => _deleteSpot(_spots[i]['name']),
+        onDelete: () => _deleteSpot(_spots[i]),
         onMapTap: () => _openMap(
           _spots[i]['kakao_url'],
           (_spots[i]['lat'] as num?)?.toDouble(),

@@ -1,8 +1,9 @@
 import os
 import csv
+from pathlib import Path
 
 def clean_existing_csv_files():
-    folder = r"C:\AI-Travel-Planner\Preprocess\data\chungnam_data"
+    folder = Path(__file__).resolve().parents[1] / "data/chungnam_data"
     
     exclude_keywords = [
         "롯데리아", "맥도날드", "버거킹", "맘스터치", "KFC", "노브랜드버거",

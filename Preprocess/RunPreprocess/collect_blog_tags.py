@@ -1,189 +1,139 @@
-"""
-장소별 네이버 블로그 태그 수집 파이프라인.
-- 입력: chungnam_places_filtered.csv (14,270개)
-- 필터: 방문자수==0 AND 블로그수==0 제거
-- 수집 대상: 블로그수 >= 5 인 장소
-- 출력: blog_tags.csv (장소명, 태그 빈도 상위 20개)
-- 이어하기 지원: 이미 처리된 장소는 건너뜀
-"""
-import os, sys, re, time, io, json
-import requests
+"""Collect per-identity tags only from posts with name and address evidence."""
+import argparse
+import json
+import os
+import re
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from urllib.parse import urlparse
+
 import pandas as pd
+import requests
+from bs4 import BeautifulSoup
+from dotenv import load_dotenv
 from tqdm import tqdm
 
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
+from place_identity import ensure_ids, text
+from blog_evidence import address_anchor, name_matches, provider_url_matches, tags_from_posts
 
-from dotenv import load_dotenv
-load_dotenv(os.path.join(os.path.dirname(__file__), '..', '..', '.env'))
-
-NAVER_ID     = os.environ['NAVER_API_ID']
-NAVER_SECRET = os.environ['NAVER_API_SECRET']
-
-BLOG_SEARCH_URL = 'https://openapi.naver.com/v1/search/blog.json'
-BLOG_HEADERS = {
-    'X-Naver-Client-Id':     NAVER_ID,
-    'X-Naver-Client-Secret': NAVER_SECRET,
-}
-PAGE_HEADERS = {
-    'User-Agent': (
-        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) '
-        'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1'
-    )
-}
-
-INPUT_CSV  = os.path.join(os.path.dirname(__file__), '..', 'data', 'processed', 'chungnam_places_filtered.csv')
-OUTPUT_CSV = os.path.join(os.path.dirname(__file__), '..', 'data', 'processed', 'blog_tags.csv')
-
-N_POSTS  = 30  # 장소당 검색 포스트 수 (API 1회로 최대 수집)
-MAX_TAGS = 20  # 저장할 상위 태그 수
-SEARCH_DELAY = 0.5  # API 호출 간격 (초)
-PAGE_DELAY   = 0.2  # 페이지 요청 간격 (초)
+load_dotenv(ROOT / '.env')
+INPUT_CSV = ROOT / 'Preprocess/data/processed/chungnam_places_filtered.csv'
+OUTPUT_CSV = ROOT / 'Preprocess/data/processed/blog_tags.csv'
+PAGE_HEADERS = {'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) Mobile Safari/604.1'}
 
 
-def search_blog_urls(place_name: str, display: int = N_POSTS) -> list[str]:
-    """
-    네이버 검색 API로 '{장소명} 후기' 검색 → 네이버 블로그 URL 목록을 반환.
-    - '후기'를 함께 질의해 실제 방문자 리뷰 게시물 위주로 수집한다.
-    - sort='sim' (정확도순)으로 관련성 높은 게시물을 우선 확보.
-    - 외부 블로그 플랫폼(티스토리 등)은 태그 구조가 달라 제외, blog.naver.com만 사용.
-    """
+def search_blog_urls(place, display=30):
+    query = ' '.join([text(place['가게명']), text(place['주소']), '후기'])
+    response = requests.get('https://openapi.naver.com/v1/search/blog.json',
+        headers={'X-Naver-Client-Id': os.environ['NAVER_API_ID'],
+                 'X-Naver-Client-Secret': os.environ['NAVER_API_SECRET']},
+        params={'query': query, 'display': display, 'sort': 'sim'}, timeout=10)
+    response.raise_for_status()
+    urls = [item['link'] for item in response.json().get('items', [])
+            if urlparse(item.get('link', '')).hostname in ('blog.naver.com', 'm.blog.naver.com')]
+    return list(dict.fromkeys(urls)), query
+
+
+def fetch_post(url, place, query):
+    mobile = url.replace('://blog.naver.com', '://m.blog.naver.com')
+    response = requests.get(mobile, headers=PAGE_HEADERS, timeout=10)
+    response.raise_for_status()
+    soup = BeautifulSoup(response.text, 'html.parser')
+    # Page chrome/search snippets/hashtags alone are not identity evidence.
+    body = soup.select_one('.se-main-container, #postViewArea, .post_ct')
+    if body is None:
+        return None
+    body_text = body.get_text(' ', strip=True)
+    name = text(place['가게명'])
+    anchor = address_anchor(place)
+    # Keep short source excerpts, including separate name/address paragraphs.
+    paragraphs = [p.get_text(' ', strip=True) for p in body.select('p, div.se-text-paragraph')]
+    paragraphs = paragraphs or [body_text]
+    name_excerpt = next((p[:1000] for p in paragraphs if name_matches(name, p)), '')
+    road_name = anchor[1].rsplit(' ', 1)[0] if anchor else ''
+    addr_paragraph = next((p for p in paragraphs if road_name and road_name in p), '')
+    # City may be in the preceding line of the post: preserve local context.
+    index = body_text.find(addr_paragraph) if addr_paragraph else -1
+    address_excerpt = body_text[max(0, index - 200):index + len(addr_paragraph) + 200][:1500] if index >= 0 else ''
+    tag_match = re.search(r'var gsTagName\s*=\s*"([^"]*)"', response.text)
+    tags = [t.strip() for t in tag_match.group(1).split(',') if t.strip()] if tag_match else []
+    pid = text(place.get('provider_place_id'))
+    provider_url = next((a.get('href', '') for a in body.select('a[href]')
+                         if provider_url_matches(pid, a.get('href', ''))), '')
+    return {'url': url, 'query': query, 'fetched_at': datetime.now(timezone.utc).isoformat(),
+            'name_excerpt': name_excerpt, 'address_excerpt': address_excerpt,
+            'provider_url': provider_url, 'tags': tags}
+
+
+def collect_place_tags(place, delay=0.2):
+    posts, errors = [], 0
     try:
-        resp = requests.get(
-            BLOG_SEARCH_URL,
-            headers=BLOG_HEADERS,
-            params={'query': f'{place_name} 후기', 'display': display, 'sort': 'sim'},
-            timeout=10,
-        )
-        resp.raise_for_status()
-        items = resp.json().get('items', [])
-        return [
-            it['link'] for it in items
-            if 'blog.naver.com' in it.get('link', '')
-        ]
-    except Exception as e:
-        tqdm.write(f'  [검색 오류] {place_name}: {e}')
-        return []
-
-
-def fetch_tags(blog_url: str) -> list[str]:
-    """
-    개별 블로그 게시물 HTML에서 작성자가 등록한 해시태그 목록을 추출.
-
-    핵심 기법 2가지:
-    1) 모바일 페이지(m.blog.naver.com) 사용:
-       - PC 페이지는 본문이 iframe + 동적 렌더링으로 감싸여 있어 정적 파싱이 어렵다.
-       - 모바일 페이지는 HTML 본문에 태그 정보가 그대로 노출되어 단일 HTTP 요청만으로 파싱 가능.
-       - 모바일 User-Agent를 함께 위장해야 정상 응답을 받을 수 있음.
-    2) 정규표현식 기반 직접 추출:
-       - 네이버 블로그는 HTML 본문에 `var gsTagName = "태그1,태그2,..."` 형태의
-         JavaScript 변수로 태그 목록을 노출한다.
-       - 이 변수의 값만 정규식으로 추출 후 쉼표 분리하면 태그 리스트 확보 완료.
-    """
-    mobile = blog_url.replace('blog.naver.com', 'm.blog.naver.com')
-    try:
-        page = requests.get(mobile, headers=PAGE_HEADERS, timeout=8)
-        match = re.search(r'var gsTagName\s*=\s*"([^"]+)"', page.text)
-        if match:
-            return [t.strip() for t in match.group(1).split(',') if t.strip()]
-    except Exception:
-        pass
-    return []
-
-
-def collect_place_tags(place_name: str, post_bar: tqdm) -> str:
-    """
-    한 장소에 대한 블로그 게시물들로부터 태그를 종합 수집해 JSON 형태로 반환.
-
-    절차:
-    1) search_blog_urls: 장소명으로 관련 블로그 URL 확보
-    2) fetch_tags: 각 URL에서 태그 추출
-    3) 수집된 태그를 후속 매칭 처리에 적합한 형태로 정제하여 반환
-    """
-    urls = search_blog_urls(place_name)
-    all_tags: dict[str, int] = {}
-    post_bar.reset(total=len(urls))
-    post_bar.set_description(f'  포스트 fetch')
+        urls, query = search_blog_urls(place)
+    except (requests.RequestException, KeyError):
+        return {'blog_tags': '{}', 'verified_posts': '[]', 'blog_tag_status': 'fetch_error'}
     for url in urls:
-        tags = fetch_tags(url)
-        for t in tags:
-            all_tags[t] = all_tags.get(t, 0) + 1
-        post_bar.update(1)
-        time.sleep(PAGE_DELAY)  # 블로그 페이지 연속 요청 시 차단 방지를 위한 지연
+        try:
+            post = fetch_post(url, place, query)
+            if post:
+                posts.append(post)
+        except requests.RequestException:
+            errors += 1
+        time.sleep(delay)
+    tags, verified = tags_from_posts(place, posts)
+    return {'blog_tags': json.dumps(tags, ensure_ascii=False),
+            'verified_posts': json.dumps(verified, ensure_ascii=False),
+            'blog_tag_status': 'verified' if verified else 'fetch_error' if errors else 'no_verified_posts'}
 
-    # 후속 매칭 처리에 사용할 형태로 정제
-    sorted_tags = sorted(all_tags.items(), key=lambda x: -x[1])[:MAX_TAGS]
-    return json.dumps({t: c for t, c in sorted_tags}, ensure_ascii=False)
 
-
-def load_done_set() -> set[str]:
-    if not os.path.exists(OUTPUT_CSV):
+def load_done_set(path=OUTPUT_CSV, retry_unverified=False):
+    if not Path(path).exists():
         return set()
-    try:
-        df = pd.read_csv(OUTPUT_CSV, encoding='utf-8-sig')
-        return set(df['가게명'].tolist())
-    except Exception:
-        return set()
+    df = pd.read_csv(path, encoding='utf-8-sig', dtype={'place_id': str})
+    if 'place_id' not in df or 'blog_tag_status' not in df:
+        return set()  # name-only legacy rows never suppress recollection
+    terminal = ['verified'] if retry_unverified else ['verified', 'no_verified_posts']
+    latest = df.drop_duplicates('place_id', keep='last')
+    return set(latest.loc[latest['blog_tag_status'].isin(terminal), 'place_id'])
 
 
-def main(test: bool = False):
-    df = pd.read_csv(INPUT_CSV, encoding='utf-8-sig')
-
-    # 1) 방문자수==0 AND 블로그수==0 제거
-    before = len(df)
-    df = df[~((df['방문자수'] == 0) & (df['블로그수'] == 0))].reset_index(drop=True)
-    print(f'데이터 로드: {before}개 → 필터 후 {len(df)}개')
-
-    # 2) 전체 대상 (사전 필터 없음 — 랭킹 알고리즘에서 자연 탈락)
-    targets = df['가게명'].tolist()
-    print(f'수집 대상: {len(targets)}개')
-
-    if test:
-        targets = targets[:5]
-        print(f'[테스트 모드] 상위 5개만 수집: {targets}\n')
-
-    # 3) 이미 처리된 장소 제외 (이어하기)
-    done = load_done_set()
-    remaining = [p for p in targets if p not in done]
-    print(f'이미 완료: {len(done)}개 / 남은 작업: {len(remaining)}개\n')
-
-    if not remaining:
-        print('모든 장소 처리 완료.')
-        return
-
-    # 4) 처리 루프 — 진행도 바 2개 (장소 / 포스트)
-    write_header = not os.path.exists(OUTPUT_CSV)
-    place_bar = tqdm(total=len(remaining), desc='장소', unit='곳', position=0)
-    post_bar  = tqdm(total=0, desc='  포스트 fetch', unit='개', position=1, leave=False)
-
-    for place in remaining:
-        place_bar.set_postfix_str(place[:20])
-        tags_json = collect_place_tags(place, post_bar)
-
-        top3 = list(json.loads(tags_json).keys())[:3]
-        tqdm.write(f'  ✓ {place} → {top3}')
-
-        row = pd.DataFrame([{'가게명': place, 'blog_tags': tags_json}])
-        row.to_csv(
-            OUTPUT_CSV,
-            mode='a',
-            header=write_header,
-            index=False,
-            encoding='utf-8-sig',
-        )
-        write_header = False
-
-        place_bar.update(1)
-        time.sleep(SEARCH_DELAY)
-
-    post_bar.close()
-    place_bar.close()
-    print(f'\n완료. 결과 저장: {OUTPUT_CSV}')
+def main(input_path=INPUT_CSV, output_path=OUTPUT_CSV, limit=None, retry_unverified=False, status=None):
+    if not os.getenv('NAVER_API_ID') or not os.getenv('NAVER_API_SECRET'):
+        raise SystemExit('NAVER_API_ID / NAVER_API_SECRET가 필요합니다. 외부 호출은 수행하지 않았습니다.')
+    df = ensure_ids(pd.read_csv(input_path, encoding='utf-8-sig', dtype={'provider_place_id': str, 'place_id': str})).drop_duplicates('place_id')
+    if status:
+        if 'blog_tag_status' not in df:
+            raise SystemExit('--status 필터에는 blog_tag_status 컬럼이 필요합니다.')
+        df = df[df['blog_tag_status'].eq(status)]
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    if output_path.exists() and 'verified_posts' not in pd.read_csv(output_path, nrows=0).columns:
+        from datetime import datetime
+        output_path.rename(str(output_path) + f'.legacy-{datetime.now():%Y%m%d%H%M%S%f}.csv')
+    done = load_done_set(output_path, retry_unverified)
+    remaining = df[~df['place_id'].isin(done)]
+    if limit is not None:
+        remaining = remaining.head(limit)
+    for place in tqdm(remaining.to_dict('records'), desc='장소 ID별 수집'):
+        result = collect_place_tags(place)
+        row = {k: place.get(k, '') for k in ('place_id', 'identity_key', '가게명', '주소', 'provider', 'provider_place_id')}
+        row.update(result)
+        row['collected_at'] = datetime.now(timezone.utc).isoformat()
+        pd.DataFrame([row]).to_csv(output_path, mode='a', header=not output_path.exists(),
+                                 index=False, encoding='utf-8-sig')
+        time.sleep(0.5)
 
 
 if __name__ == '__main__':
-    import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('--test', action='store_true', help='테스트 모드: 상위 5개 장소만 수집')
+    parser.add_argument('--input', type=Path, default=INPUT_CSV)
+    parser.add_argument('--output', type=Path, default=OUTPUT_CSV)
+    parser.add_argument('--limit', type=int)
+    parser.add_argument('--test', action='store_true', help='실제 API 호출을 최대 5개로 제한')
+    parser.add_argument('--retry-unverified', action='store_true')
+    parser.add_argument('--status', choices=['ambiguous_legacy', 'legacy_unverified', 'needs_collection'])
     args = parser.parse_args()
-    main(test=args.test)
+    main(args.input, args.output, 5 if args.test else args.limit, args.retry_unverified, args.status)

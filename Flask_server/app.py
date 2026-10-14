@@ -1,13 +1,13 @@
-import os, json, logging, sqlite3, time
+import os, json, logging, sqlite3, time, re, math
 from datetime import datetime
 import anthropic
 import pandas as pd
 from flask import Flask, request, jsonify
-from geopy.distance import geodesic
 from dotenv import load_dotenv
 
-from recommendation_ai import add_scores, greedy_tsp, generate_fixed_courses, generate_from_slots
-from clustering_ai import perform_clustering
+from recommendation_ai import (add_scores, greedy_tsp, search_courses, fixed_categories,
+                               SLOT_CATEGORY_MAP, FOOD_CATS, route_metrics, distances_from)
+from place_identity import quarantine_legacy
 
 load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
 
@@ -28,10 +28,10 @@ def get_df(region: str = '') -> pd.DataFrame:
         df = pd.read_sql('SELECT * FROM places', conn)
     conn.close()
     log.info(f"DB 조회: 지역={region or '전체'}, {len(df)}개")
-    return df
+    return quarantine_legacy(df).drop_duplicates('place_id')
 
 # ── Claude 클라이언트 ─────────────────────────────────────────
-_claude = anthropic.Anthropic(api_key=os.environ['ANTHROPIC_API_KEY'])
+_claude = None
 MODEL   = 'claude-haiku-4-5-20251001'
 
 # spot 모드: 텍스트에서 장소 종류(카테고리)만 추출
@@ -42,6 +42,7 @@ SPOT_CATEGORY_SYSTEM = """\
 - 사용자가 명시한 장소 종류만 포함. 상위/유사 카테고리 추가 금지.
 - 예) "닭갈비" → ["닭갈비"]  ← "고기", "한식" 추가 금지
 - 예) "카페" → ["카페"]  ← "음식점", "디저트" 추가 금지
+- 부정·제외 표현의 제외 대상은 포함하지 마세요. "닭갈비 말고 카페" → ["카페"]
 - 장소를 명시하지 않은 경우 빈 배열 []
 
 JSON만 반환. 다른 텍스트 금지.
@@ -93,6 +94,12 @@ JSON만 반환. 형식: {"blog_tag_keywords": [...]}"""
 
 
 def _call_claude(system: str, user_msg: str, max_tokens: int = 512, max_retries: int = 3) -> dict:
+    global _claude
+    if _claude is None:
+        key = os.getenv('ANTHROPIC_API_KEY')
+        if not key:
+            raise RuntimeError('ANTHROPIC_API_KEY가 없어 언어 해석을 사용할 수 없습니다.')
+        _claude = anthropic.Anthropic(api_key=key)
     delay = 0.8
     last_exc: Exception | None = None
     for attempt in range(max_retries):
@@ -118,9 +125,24 @@ def _call_claude(system: str, user_msg: str, max_tokens: int = 512, max_retries:
     raise last_exc  # type: ignore[misc]
 
 
-def extract_spot_category(user_text: str) -> list:
+def _string_list(value, field):
+    if not isinstance(value, list) or len(value) > 50 or any(not isinstance(v, str) or not v.strip() or len(v) > 100 for v in value):
+        raise ValueError(f'{field}는 비어 있지 않은 문자열의 배열이어야 합니다.')
+    return list(dict.fromkeys(v.strip() for v in value))
+
+
+def extract_spot_category(user_text):
+    # Preserve known explicit terms offline, even when the LLM is unavailable.
+    known = set(_FOOD_CAFE_CATS) | {c for cats in SLOT_CATEGORY_MAP.values() for c in cats}
+    found = [c for c in sorted(known) if c in user_text and
+             (c != '산' or re.search(r'(?:^|\s)산(?:$|\s)', user_text))]
+    found = [c for c in found if not any(c != other and c in other for other in found)]
+    if any(c in FOOD_CATS and c not in ('음식점', '식당') for c in found):
+        found = [c for c in found if c not in ('음식점', '식당')]
+    if found and not re.search(r'말고|제외|빼고|아닌|아니고|않', user_text):
+        return found
     result = _call_claude(SPOT_CATEGORY_SYSTEM, f'입력: "{user_text}"')
-    return result.get('category_filters', [])
+    return _string_list(result.get('category_filters', []), 'category_filters')
 
 
 def get_season() -> str:
@@ -142,7 +164,7 @@ def expand_persona_tags(persona_tags: list, region: str = '', season: str = '') 
         msg += f', 계절: {season}'
     try:
         result = _call_claude(TAG_BLOG_SYSTEM, msg)
-        return result.get('blog_tag_keywords', [])
+        return _string_list(result.get('blog_tag_keywords', []), 'blog_tag_keywords')
     except Exception:
         return list(persona_tags)
 
@@ -206,70 +228,57 @@ def _in_service_area(lat: float, lng: float) -> bool:
             _SERVICE_LNG[0] <= lng <= _SERVICE_LNG[1])
 
 
-def filter_radius(df: pd.DataFrame, lat: float, lng: float, transport: str) -> pd.DataFrame:
+def filter_radius(df, lat, lng, transport):
+    result = df.copy()
+    for col in ('latitude', 'longitude'):
+        result[col] = pd.to_numeric(result[col], errors='coerce')
+    result = result[result['latitude'].between(-90, 90) & result['longitude'].between(-180, 180)]
+    distances = distances_from((lat, lng), result[['latitude', 'longitude']].values)
+    result['origin_distance_km'] = distances
+    return result[distances <= RADIUS_KM[transport]].copy()
+
+
+def category_matches(category, filters):
+    value = str(category or '').lower()
+    tokens = re.split(r'[,>/\s]+', value)
+    for term in filters:
+        term = term.lower()
+        if term == '산':
+            if '산' in tokens:
+                return True
+        elif term == '카페' and '키즈카페' in value:
+            continue
+        elif term in value:
+            return True
+    return False
+
+
+def filter_keywords(df, category_filters, blog_tag_keywords):
+    """Hard category constraints only; preferences are handled by add_scores.
+
+    Actual category wins over the crawler search term. Search terms are used only
+    when the actual category is missing. Literal matching avoids regex injection.
     """
-    사용자 좌표를 중심으로 이동 수단별 반경 내 장소만 남기는 1차 필터.
-    각 장소와의 거리는 geopy의 측지 거리(geodesic)로 계산한다.
-    """
-    r = RADIUS_KM.get(transport, 5.0)
-    mask = df.apply(
-        lambda row: geodesic((lat, lng), (row['latitude'], row['longitude'])).kilometers <= r,
-        axis=1,
-    )
-    return df[mask].copy()
-
-
-# ── 키워드 필터 ───────────────────────────────────────────────
-def _tag_has_any(tags_json, keywords: list) -> bool:
-    """장소의 blog_tags(JSON 문자열) 키 중 하나라도 keywords에 포함되면 True."""
-    if pd.isna(tags_json):
-        return False
-    try:
-        keys = ' '.join(json.loads(tags_json).keys())
-        return any(kw in keys for kw in keywords)
-    except Exception:
-        return False
-
-
-def filter_keywords(df: pd.DataFrame, category_filters: list, blog_tag_keywords: list) -> pd.DataFrame:
-    """
-    카테고리 + 블로그 태그 키워드 두 조건을 AND로 결합하여 후보를 좁힌다.
-
-    - 카테고리: '카테고리' 또는 'search_category' 컬럼에 후보 키워드 중 하나라도 포함되면 통과 (OR)
-    - 블로그 태그: 장소별 수집된 블로그 태그에 사용자 키워드 중 하나라도 매칭되면 통과
-    - Fallback: 두 조건 모두 적용 시 결과가 3개 미만이면, 블로그 태그 조건을 완화하여
-      카테고리 조건만으로 재필터링 → 사용자 입력이 너무 좁아 후보가 사라지는 상황을 방지
-    """
-    if category_filters:
-        pat = '|'.join(category_filters)
-        cat_mask = (
-            df['카테고리'].str.contains(pat, case=False, na=False) |
-            df['search_category'].str.contains(pat, case=False, na=False)
-        )
-    else:
-        cat_mask = pd.Series(True, index=df.index)
-
-    if blog_tag_keywords:
-        tag_mask = df['blog_tags'].apply(lambda x: _tag_has_any(x, blog_tag_keywords))
-    else:
-        tag_mask = pd.Series(True, index=df.index)
-
-    result = df[cat_mask & tag_mask]
-    # 결과가 너무 적으면 태그 조건 완화 (카테고리만 만족하는 후보까지 허용)
-    if len(result) < 3 and blog_tag_keywords:
-        result = df[cat_mask]
-    return result.copy()
+    if not category_filters:
+        return df.copy()
+    category = df.get('카테고리', pd.Series('', index=df.index)).fillna('')
+    fallback = df.get('search_category', pd.Series('', index=df.index)).fillna('')
+    effective = category.where(category.str.strip().ne(''), fallback)
+    return df[effective.map(lambda c: category_matches(c, category_filters)).astype(bool)].copy()
 
 
 # ── 응답 포맷 ─────────────────────────────────────────────────
 def _fmt(record: dict) -> dict:
     return {
+        'place_id': record['place_id'],
+        'identity_key': record['identity_key'],
         'name':     record['가게명'],
         'lat':      record['latitude'],
         'lng':      record['longitude'],
         'address':  record['주소'],
         'category': record['카테고리'],
         'score':    round(float(record.get('score', 0)), 3),
+        'blog_tag_status': record.get('blog_tag_status', 'legacy_unverified'),
     }
 
 
@@ -293,113 +302,118 @@ def suggest_tags():
 # ─────────────────────────────────────────────────────────────
 # POST /recommend/spot — 지금 당장 뭘 할지 (상위 5곳)
 # ─────────────────────────────────────────────────────────────
+def _parse_request(course=False):
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        raise ValueError('JSON 객체를 보내주세요.')
+    for field in ('user_lat', 'user_lng'):
+        value = data.get(field)
+        if isinstance(value, bool):
+            raise ValueError(f'{field}는 유효한 좌표여야 합니다.')
+        try:
+            data[field] = float(value)
+        except (TypeError, ValueError):
+            raise ValueError(f'{field}는 유효한 좌표여야 합니다.') from None
+        if not math.isfinite(data[field]):
+            raise ValueError(f'{field}는 유효한 좌표여야 합니다.')
+    if not -90 <= data['user_lat'] <= 90 or not -180 <= data['user_lng'] <= 180:
+        raise ValueError('좌표 범위를 확인해주세요.')
+    data.setdefault('transport', '대중교통')
+    if not isinstance(data['transport'], str) or data['transport'] not in RADIUS_KM:
+        raise ValueError('transport는 차 또는 대중교통이어야 합니다.')
+    data.setdefault('region', '')
+    if not isinstance(data['region'], str) or data['region'] not in ('', '내 주변', '천안', '아산'):
+        raise ValueError('region은 천안, 아산 또는 내 주변이어야 합니다.')
+    data['persona_tags'] = _string_list(data.get('persona_tags', []), 'persona_tags')
+    def integer(field, default, lo, hi):
+        value = data.get(field, default)
+        if isinstance(value, bool) or not isinstance(value, int) or not lo <= value <= hi:
+            raise ValueError(f'{field}는 {lo}~{hi} 정수여야 합니다.')
+        data[field] = value
+    integer('count', 3 if course else 5, 1, 5 if course else 20)
+    integer('seed', 0, 0, 2147483647)
+    if course:
+        slots = data.get('slot_types', [])
+        if not isinstance(slots, list) or any(s not in SLOT_CATEGORY_MAP for s in slots if isinstance(s, str)) or any(not isinstance(s, str) for s in slots):
+            raise ValueError('slot_types에 알 수 없는 슬롯이 있습니다.')
+        data['slot_types'] = slots
+        integer('spot_count', len(slots) if slots else 3, 3, 5)
+        if slots and len(slots) != data['spot_count']:
+            raise ValueError('slot_types 길이와 spot_count가 일치해야 합니다.')
+    else:
+        data.setdefault('user_text', '')
+        if not isinstance(data['user_text'], str) or len(data['user_text']) > 1000:
+            raise ValueError('user_text는 1000자 이내 문자열이어야 합니다.')
+    return data
+
+
+def _area_error(data):
+    return not _in_service_area(data['user_lat'], data['user_lng'])
+
+
 @app.route('/recommend/spot', methods=['POST'])
 def recommend_spot():
     try:
-        data         = request.get_json()
-        user_text    = data.get('user_text', '')
-        transport    = data.get('transport', '대중교통')
-        region       = data.get('region', '')
-        user_lat     = float(data['user_lat'])
-        user_lng     = float(data['user_lng'])
-        persona_tags = data.get('persona_tags', [])
-        count        = max(1, min(int(data.get('count', 5)), 20))
-
-        if not _in_service_area(user_lat, user_lng):
-            return jsonify({'error': '서비스 지역(천안·아산)을 벗어난 위치입니다. 지역을 천안 또는 아산으로 선택해주세요.'}), 422
-
-        log.info(f"[spot] region={region} | text={user_text!r} | tags={persona_tags} | count={count}")
-
-        # Claude 호출 #1: 텍스트 → 카테고리 필터
-        cat_f = extract_spot_category(user_text) if user_text else []
-        # 태그 기반 카테고리를 항상 병합 (Claude가 "음식점" 같은 상위 개념 반환 시 DB 미스매치 보완)
-        tag_cats = derive_category_from_tags(persona_tags)
-        cat_f = list(dict.fromkeys(cat_f + tag_cats))
-        # Claude 호출 #2: 선택 페르소나 태그 → 블로그 검색 키워드
-        tag_f = expand_persona_tags(persona_tags, region, get_season())
-
-        log.info(f"[spot] cat={cat_f} | blog_kw={tag_f}")
-
-        df = filter_radius(get_df(region), user_lat, user_lng, transport)
-
-        # 맛집/카페 태그 미선택 + 텍스트에도 음식 카테고리 없으면 → 음식점·카페 제외
-        food_cafe_selected = any(t in _FOOD_CAFE_TAGS for t in persona_tags)
-        food_in_cat_f = any(c in set(_FOOD_CAFE_CATS) for c in cat_f)
-        if not food_cafe_selected and not food_in_cat_f:
-            excl_pat = '|'.join(_FOOD_CAFE_CATS)
-            df = df[~(
-                df['카테고리'].str.contains(excl_pat, case=False, na=False) |
-                df['search_category'].str.contains(excl_pat, case=False, na=False)
-            )]
-
-        df = filter_keywords(df, cat_f, tag_f)
-        df = add_scores(df, tag_f)
-
-        if df.empty:
-            return jsonify({'error': '조건에 맞는 장소가 없습니다.'}), 404
-
-        top_n = df.nlargest(count, 'score').to_dict('records')
-        route = greedy_tsp(top_n, (user_lat, user_lng))
-
-        return jsonify({'places': [_fmt(p) for p in route]}), 200
-
-    except Exception as e:
+        data = _parse_request()
+    except ValueError as e:
+        return jsonify(error=str(e), reason='invalid_request'), 400
+    if _area_error(data):
+        return jsonify(error='서비스 지역(천안·아산)을 벗어난 위치입니다.', reason='outside_service_area'), 422
+    try:
+        explicit = extract_spot_category(data['user_text']) if data['user_text'].strip() else []
+    except Exception:
+        log.exception('명시 카테고리 해석 실패')
+        return jsonify(error='장소 종류를 해석하지 못했습니다. 구체적인 종류로 다시 입력해주세요.', reason='category_unavailable'), 503
+    try:
+        # Explicit kinds always take precedence over persona category hints.
+        cats = explicit or derive_category_from_tags(data['persona_tags'])
+        tags = expand_persona_tags(data['persona_tags'], data['region'], get_season())
+        df = filter_radius(get_df(data['region']), data['user_lat'], data['user_lng'], data['transport'])
+        if not cats and not any(t in _FOOD_CAFE_TAGS for t in data['persona_tags']):
+            df = df[~df['카테고리'].map(lambda c: category_matches(c, _FOOD_CAFE_CATS)).astype(bool)]
+        df = add_scores(filter_keywords(df, cats, []), tags)
+        top = df.sort_values(['score', 'origin_distance_km', 'place_id'], ascending=[False, True, True]).head(data['count']).to_dict('records')
+        route = greedy_tsp(top, (data['user_lat'], data['user_lng']))
+        metadata = dict(requested_count=data['count'], returned_count=len(route),
+                        category_filters=cats, constraints_relaxed=[],
+                        reason=None if len(route) == data['count'] else 'insufficient_candidates')
+        if not route:
+            return jsonify(error='조건에 맞는 장소가 없습니다.', places=[], metadata=metadata), 422
+        return jsonify(places=[_fmt(p) for p in route], metadata=metadata), 200
+    except Exception:
         log.exception('[spot] 오류')
-        return jsonify({'error': str(e)}), 500
+        return jsonify(error='추천 처리 중 오류가 발생했습니다.', reason='internal_error'), 500
 
 
-# ─────────────────────────────────────────────────────────────
-# POST /recommend/course — 오늘 뭘 할지 (5-stop 코스 × 3개)
-# ─────────────────────────────────────────────────────────────
 @app.route('/recommend/course', methods=['POST'])
 def recommend_course():
     try:
-        data         = request.get_json()
-        transport    = data.get('transport', '대중교통')
-        region       = data.get('region', '')
-        user_lat     = float(data['user_lat'])
-        user_lng     = float(data['user_lng'])
-        persona_tags = data.get('persona_tags', [])
-        count        = max(1, min(int(data.get('count', 3)), 5))
-        spot_count   = max(3, min(int(data.get('spot_count', 3)), 5))
-
-        if not _in_service_area(user_lat, user_lng):
-            return jsonify({'error': '서비스 지역(천안·아산)을 벗어난 위치입니다. 지역을 천안 또는 아산으로 선택해주세요.'}), 422
-
-        log.info(f"[course] region={region} | tags={persona_tags} | count={count} | spots={spot_count}")
-
-        # Claude 호출: 선택 페르소나 태그 → 블로그 검색 키워드
-        tag_f = expand_persona_tags(persona_tags, region, get_season())
-        log.info(f"[course] blog_kw={tag_f}")
-
-        radius_df = filter_radius(get_df(region), user_lat, user_lng, transport)
-        if len(radius_df) < spot_count:
-            return jsonify({'error': '반경 내 장소가 너무 적습니다.'}), 404
-
-        clustered_df = perform_clustering(radius_df, transport)
-        slot_types = data.get('slot_types', []) or []
-        # slot_types 길이와 spot_count 정합성 강제: 클라이언트가 보낸 slot_types를 spot_count에 맞게 조정
-        if slot_types and len(slot_types) != spot_count:
-            if len(slot_types) > spot_count:
-                slot_types = slot_types[:spot_count]
-            else:
-                _default_pool = ['음식', '자연·산책', '카페', '문화·역사', '음식']
-                while len(slot_types) < spot_count:
-                    slot_types.append(_default_pool[len(slot_types) % len(_default_pool)])
-            log.warning(f"[course] slot_types 길이 조정 → {slot_types}")
-        if slot_types:
-            courses = generate_from_slots(clustered_df, slot_types, tag_f, filter_keywords, n=count)
-        else:
-            courses = generate_fixed_courses(clustered_df, tag_f, filter_keywords, n=count, spots=spot_count)
-
+        data = _parse_request(course=True)
+    except ValueError as e:
+        return jsonify(error=str(e), reason='invalid_request'), 400
+    if _area_error(data):
+        return jsonify(error='서비스 지역(천안·아산)을 벗어난 위치입니다.', reason='outside_service_area'), 422
+    try:
+        tags = expand_persona_tags(data['persona_tags'], data['region'], get_season())
+        df = filter_radius(get_df(data['region']), data['user_lat'], data['user_lng'], data['transport'])
+        cats = ([SLOT_CATEGORY_MAP[s] for s in data['slot_types']] if data['slot_types']
+                else fixed_categories(data['spot_count']))
+        start = (data['user_lat'], data['user_lng'])
+        courses, metadata = search_courses(df, cats, tags, filter_keywords, data['count'],
+                                           start, data['transport'], data['seed'])
+        metadata.update(requested_count=data['count'], returned_count=len(courses),
+                        slot_types=data['slot_types'], radius_km=RADIUS_KM[data['transport']],
+                        distance_method='coordinate_great_circle',
+                        limitation='좌표 기반 직선거리 추정입니다. 도로·대중교통 경로시간과 영업시간은 확인되지 않았습니다.')
+        metrics = [route_metrics(c, start) for c in courses]
         if not courses:
-            return jsonify({'error': '코스를 구성할 장소가 부족합니다.'}), 404
-
-        return jsonify({'courses': [[_fmt(p) for p in course] for course in courses]}), 200
-
-    except Exception as e:
+            return jsonify(error='슬롯 조건을 유지하는 코스를 구성할 장소가 부족합니다.',
+                           courses=[], course_metrics=[], metadata=metadata), 422
+        return jsonify(courses=[[_fmt(p) for p in c] for c in courses],
+                       course_metrics=metrics, metadata=metadata), 200
+    except Exception:
         log.exception('[course] 오류')
-        return jsonify({'error': str(e)}), 500
+        return jsonify(error='추천 처리 중 오류가 발생했습니다.', reason='internal_error'), 500
 
 
 if __name__ == '__main__':

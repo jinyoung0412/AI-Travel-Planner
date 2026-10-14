@@ -40,3 +40,10 @@ error_log.txt
 # =========================
 CLAUDE.md
 .claude/
+
+# Offline migration backups and generated validation artifacts (keep locally)
+*.db.backup-*
+*.legacy.bak
+*.csv.bak
+local_artifacts/
+.pytest_cache/

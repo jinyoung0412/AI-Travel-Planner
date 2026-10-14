@@ -12,8 +12,9 @@ from Preprocess.crawler.pagination import go_next_page
 from Preprocess.crawler.parser import extract_list_items, extract_name_element, parse_detail_page
 from Preprocess.crawler.saver import (
     get_csv_path, save_item, touch_init_file,
-    mark_task_completed, is_task_completed
+    mark_task_completed, is_task_completed, DATA_DIR, load_existing_ids
 )
+from place_identity import place_id
 from Preprocess.crawler.throttler import throttle_click_delay, throttle_page_delay
 
 class ChungnamCrawler:
@@ -117,21 +118,12 @@ class ChungnamCrawler:
             pass
         return False
 
-    def load_existing_names_for_region(self, region):
+    def load_existing_ids_for_region(self, region):
         existing = set()
-        folder = r"C:\AI-Travel-Planner\Preprocess\data\chungnam_data"
-        if not os.path.exists(folder):
-            return existing
-        clean_reg = region.replace(" ", "_")
-        prefix = f"충남_{clean_reg}"
-        for filename in os.listdir(folder):
-            if filename.startswith(prefix) and filename.endswith(".csv"):
-                filepath = os.path.join(folder, filename)
-                with open(filepath, "r", encoding="utf-8-sig") as f:
-                    reader = csv.DictReader(f)
-                    for row in reader:
-                        if "가게명" in row:
-                            existing.add(row["가게명"])
+        if DATA_DIR.exists():
+            prefix = f'충남_{region.replace(" ", "_")}'
+            for path in DATA_DIR.glob(prefix + '*.csv'):
+                existing.update(load_existing_ids(path))
         return existing
 
     def process_page(self, region, category, keyword, csv_path, existing, page):
@@ -165,7 +157,7 @@ class ChungnamCrawler:
                 item = current_items[idx]
                 el, name = extract_name_element(item)
 
-                if not name or name in existing:
+                if not name:
                     continue
 
                 is_excluded = any(kw in name for kw in self.exclude_keywords)
@@ -199,14 +191,22 @@ class ChungnamCrawler:
                             else: continue
                     else: continue
 
-                cat, addr, v_rev, b_rev, op_time = parse_detail_page(self.driver)
+                cat, addr, v_rev, b_rev, op_time, provider_id = parse_detail_page(self.driver)
+                if not addr and not provider_id:
+                    continue
+                identity = place_id({'name': name, 'address': addr,
+                                     'provider': 'naver' if provider_id else '',
+                                     'provider_place_id': provider_id})
+                if identity in existing:
+                    continue
                 save_item(csv_path, {
                     "page": page, "rank": idx + 1, "name": name,
                     "category": cat if cat else category, "address": addr,
                     "keyword": keyword, "visitor_review": v_rev,
-                    "blog_review": b_rev, "operating_time": op_time
+                    "blog_review": b_rev, "operating_time": op_time,
+                    "provider": "naver" if provider_id else "", "provider_place_id": provider_id
                 })
-                existing.add(name)
+                existing.add(identity)
                 new_count += 1
                 throttle_click_delay()
 
@@ -224,11 +224,11 @@ class ChungnamCrawler:
                 except Exception:
                     pass
 
-        # 새로 저장한 항목이 없으면 0 반환 → 호출부에서 다음 페이지로 넘어가지 않음
+        # 이 페이지의 신규 저장 수. 다음 페이지에도 미수집 지점이 있을 수 있다.
         return new_count
 
     def crawl_region_all_categories(self, region, categories, q=None):
-        existing_names = self.load_existing_names_for_region(region)
+        existing_ids = self.load_existing_ids_for_region(region)
 
         try:
             self.start_driver()
@@ -260,8 +260,7 @@ class ChungnamCrawler:
                     while page <= 10:
                         if not self.scroll_list(): break
                         time.sleep(1.0)
-                        if self.process_page(region, category, keyword, csv_path, existing_names, page) == 0:
-                            break
+                        self.process_page(region, category, keyword, csv_path, existing_ids, page)
                         self.driver.switch_to.default_content()
                         self.driver.switch_to.frame("searchIframe")
                         if not go_next_page(self.driver): break

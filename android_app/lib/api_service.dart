@@ -58,11 +58,13 @@ class ApiService {
     required String name,
     required double lat,
     required double lng,
+    String address = '',
   }) async {
     try {
       final uri = Uri.parse('$baseUrl/kakao/place').replace(
         queryParameters: {
           'name': name,
+          'address': address,
           'lat': lat.toString(),
           'lng': lng.toString(),
         },
@@ -88,7 +90,11 @@ class ApiService {
       if (response.statusCode == 200) {
         return jsonDecode(utf8.decode(response.bodyBytes));
       }
-      return {'error': '서버 오류 (${response.statusCode})'};
+      final decoded = jsonDecode(utf8.decode(response.bodyBytes));
+      final error = decoded['error'];
+      final details = error is Map ? Map<String, dynamic>.from(error) : decoded;
+      return {...Map<String, dynamic>.from(details),
+        'error': details['error'] ?? '서버 오류 (${response.statusCode})'};
     } catch (e) {
       return {'error': '네트워크 오류: $e'};
     }

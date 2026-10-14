@@ -6,12 +6,16 @@ class CourseResultScreen extends StatefulWidget {
   final List<List<dynamic>> courses;
   final int requestedCount;
   final String region;
+  final Map<String, dynamic> metadata;
+  final List<dynamic> courseMetrics;
 
   const CourseResultScreen({
     super.key,
     required this.courses,
     required this.requestedCount,
     this.region = '',
+    this.metadata = const {},
+    this.courseMetrics = const [],
   });
 
   @override
@@ -32,16 +36,7 @@ class _CourseResultScreenState extends State<CourseResultScreen> {
 
   Future<void> _checkSavedStates() async {
     for (int i = 0; i < widget.courses.length; i++) {
-      final spots = widget.courses[i]
-          .map((e) => Map<String, dynamic>.from(e as Map))
-          .map((p) => {
-                'name': p['name'] ?? '',
-                'lat': p['lat'],
-                'lng': p['lng'],
-                'category': p['category'] ?? '',
-                'kakao_url': p['kakao_url'],
-              })
-          .toList();
+      final spots = _buildSpots(i);
       final saved = await LocalStorageService.isCourseSaved(spots);
       if (saved && mounted) setState(() => _savedPages.add(i));
     }
@@ -56,13 +51,6 @@ class _CourseResultScreenState extends State<CourseResultScreen> {
   List<Map<String, dynamic>> _buildSpots(int pageIndex) {
     return widget.courses[pageIndex]
         .map((e) => Map<String, dynamic>.from(e as Map))
-        .map((p) => {
-              'name': p['name'] ?? '',
-              'lat': p['lat'],
-              'lng': p['lng'],
-              'category': p['category'] ?? '',
-              'kakao_url': p['kakao_url'],
-            })
         .toList();
   }
 
@@ -184,7 +172,7 @@ class _CourseResultScreenState extends State<CourseResultScreen> {
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        '선택하신 조건에 맞는 코스가 부족해 ${widget.courses.length}개만 추천되었어요.',
+                        '슬롯 조건을 유지하는 서로 다른 코스가 ${widget.courses.length}개 있어요.',
                         style: const TextStyle(fontSize: 13, color: Color(0xFF795548)),
                       ),
                     ),
@@ -192,6 +180,15 @@ class _CourseResultScreenState extends State<CourseResultScreen> {
                 ),
               ),
             ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+            child: Text(
+              widget.courseMetrics.length > _currentPage
+                  ? '출발점부터 약 ${widget.courseMetrics[_currentPage]['estimated_distance_km']}km (직선거리 추정)\n교통 경로시간과 영업시간은 방문 전 확인해주세요.'
+                  : '교통 경로시간과 영업시간은 방문 전 확인해주세요.',
+              style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+            ),
+          ),
           // 코스 PageView
           Expanded(
             child: PageView.builder(
