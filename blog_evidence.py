@@ -11,13 +11,40 @@ def compact(value):
     return re.sub(r'\s+', '', normalize(value))
 
 
+# Whitespace/newlines may separate address components, but characters inside a
+# city/road name are never removed. A building sub-number is one complete token.
+_CITY = re.compile(r'(?<![가-힣a-z0-9_])([가-힣]+시)(?![가-힣a-z0-9_])')
+_ROAD = re.compile(r'(?<![가-힣a-z0-9_·])([가-힣a-z0-9·]+(?:로|길))\s*'
+                   r'(\d+(?:\s*-\s*\d+)?)(?![가-힣a-z0-9_-]|\s*-)')
+
+
+def _addresses(value):
+    normalized = normalize(value)
+    cities = list(_CITY.finditer(normalized))
+    for i, city in enumerate(cities):
+        end = min(city.end() + 250, cities[i + 1].start() if i + 1 < len(cities) else len(normalized))
+        # Never attach a road belonging to a later city to an earlier mention.
+        for road in _ROAD.finditer(normalized, city.end()):
+            if road.start() >= end:
+                break
+            if road.end() > end:
+                continue
+            number = re.sub(r'\s+', '', road.group(2))
+            yield (city.group(1), f'{road.group(1)} {number}'), normalized, city.start(), road.end()
+
+
 def address_anchor(place):
-    address = normalize(place.get('주소', place.get('address')))
-    city = re.search(r'([가-힣]+시)(?: |$)', address)
-    road = re.search(r'([가-힣0-9·]+(?:로|길))\s+(\d+(?:-\d+)?)', address)
-    if city and road:
-        return city.group(1), f'{road.group(1)} {road.group(2)}'
-    return None
+    value = place.get('주소', place.get('address'))
+    return next((anchor for anchor, _, _, _ in _addresses(value)), None)
+
+
+def address_evidence_excerpt(place, value):
+    expected = address_anchor(place)
+    if expected:
+        for anchor, normalized, start, end in _addresses(value):
+            if anchor == expected:
+                return normalized[max(0, start - 100):end + 100]
+    return ''
 
 
 def name_matches(name, excerpt):
@@ -47,11 +74,7 @@ def verify_post(place, post):
         # Missing street address requires a provider URL in the actual post.
         pid = text(place.get('provider_place_id'))
         return provider_url_matches(pid, post.get('provider_url'))
-    city, road = anchor
-    road_name, number = road.rsplit(' ', 1)
-    # Number boundaries matter: road 10 must not match road 100 or 10-2.
-    return bool(city in excerpt and re.search(re.escape(road_name) + r'\s*' +
-                re.escape(number) + r'(?![\d-])', excerpt))
+    return bool(address_evidence_excerpt(place, excerpt))
 
 
 def tags_from_posts(place, serialized):

@@ -30,3 +30,12 @@ test('map API is mocked, bounded and passes original coordinates', async () => {
 test('map failure propagates to the gateway error handler', async () => {
     await assert.rejects(findPlace({ get: async () => { throw new Error('mock timeout'); } }, input, {}), /mock timeout/);
 });
+
+const addressCases = require('../tests/fixtures/address_cases.json');
+for (const fixture of addressCases) {
+    test(`complete address tokens: ${fixture.label}`, () => {
+        const expected = { ...input, address: '충남 천안시 중앙로 10' };
+        const actual = { ...doc, road_address_name: fixture.address, address_name: '' };
+        assert.equal(selectIdentityMatch([actual], expected)?.id ?? null, fixture.matches ? '1' : null);
+    });
+}
