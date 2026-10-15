@@ -49,7 +49,8 @@ def add_scores(df, blog_tag_keywords):
             return sum(tok in keys for tok in tokens) / len(tokens) if tokens else 0.0
         except (TypeError, ValueError):
             return 0.0
-    result['tag_score'] = result.get('blog_tags', pd.Series('{}', index=result.index)).map(match)
+    verified = result.get('blog_tag_status', pd.Series('', index=result.index)).eq('verified')
+    result['tag_score'] = result.get('blog_tags', pd.Series('{}', index=result.index)).where(verified, '{}').map(match)
     # Equal bounded signals; no match evidence => popularity alone. Product
     # defaults, not learned weights. Both remain available in the scored DataFrame.
     result['score'] = ((result['pop_score'] + result['tag_score']) / 2

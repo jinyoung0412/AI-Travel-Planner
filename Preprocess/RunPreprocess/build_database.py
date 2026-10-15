@@ -2,6 +2,7 @@
 import argparse
 import json
 import os
+import re
 import sqlite3
 import sys
 import tempfile
@@ -12,7 +13,7 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
-from place_identity import ensure_ids, text
+from place_identity import ensure_ids, identity_key, text
 from blog_evidence import tags_from_posts
 
 PLACES_CSV = ROOT / 'Preprocess/data/processed/chungnam_places_filtered.csv'
@@ -35,6 +36,17 @@ def _read_csv(path):
 
 
 BLOG_COLUMNS = {'blog_tags', 'verified_posts', 'blog_tag_status'}
+ALIAS_COLUMN = 'identity_aliases'
+_LOCAL_ID = re.compile(r'local:v1:[0-9a-f]{64}\Z')
+
+
+def _stored_aliases(row):
+    value = row.get(ALIAS_COLUMN)
+    try:
+        value = json.loads(value) if isinstance(value, str) else value
+    except (TypeError, ValueError):
+        return set()
+    return {a for a in value if isinstance(a, str) and _LOCAL_ID.fullmatch(a)} if isinstance(value, list) else set()
 
 
 def _audit_frame(records):
@@ -50,14 +62,18 @@ def _combine_metadata(previous, places):
     return pd.DataFrame([*previous.to_dict('records'), *places.to_dict('records')], columns=columns)
 
 
-def merge_verified_tags(places, blog_tags, existing=None, replace_all=False):
+def merge_verified_tags(places, blog_tags, existing=None, replace_all=False, metadata_mode='snapshot'):
     """Upsert metadata, retain omitted identities and union revalidated evidence.
 
     Full catalog and recollection queue are distinct inputs. Even an accidentally
     supplied queue cannot delete existing rows. Only replace_all removes IDs not
     in the metadata input. Evidence priority for the same URL is explicit tag CSV
     > current DB > catalog snapshot; failed/empty recollections never erase proof.
+    Snapshot metadata fills missing cells; explicit update mode changes existing
+    metadata. Local identity aliases persist in the catalog's identity_aliases.
     """
+    if metadata_mode not in ('snapshot', 'update'):
+        raise ValueError('metadata_mode는 snapshot 또는 update이어야 합니다.')
     previous = existing if existing is not None else pd.DataFrame()
     combined = ensure_ids(_combine_metadata(previous, places))
     old_count = len(previous)
@@ -65,17 +81,39 @@ def merge_verified_tags(places, blog_tags, existing=None, replace_all=False):
     input_rows = combined.iloc[old_count:].to_dict('records')
     raw_rows = _combine_metadata(previous, places).to_dict('records')
     # Re-ingestion can upgrade a known local identity to a unique provider ID.
-    aliases = {text(raw.get('place_id')): row['place_id'] for raw, row in zip(raw_rows, combined.to_dict('records'))
-               if text(raw.get('place_id'))}
+    alias_candidates = {}
+    aliases_per_id = {}
+    for raw, row in zip(raw_rows, combined.to_dict('records')):
+        candidates = _stored_aliases(raw) | {text(raw.get('place_id')), text(row.get('identity_key'))}
+        candidates = {a for a in candidates if _LOCAL_ID.fullmatch(a)}
+        aliases_per_id.setdefault(row['place_id'], set()).update(candidates)
+    # Ambiguous aliases never join two distinct known provider IDs.
+    for pid, candidates in aliases_per_id.items():
+        for alias in candidates:
+            alias_candidates.setdefault(alias, set()).add(pid)
     input_ids = {row['place_id'] for row in input_rows}
     metadata = {}
-    for row in [*old_rows, *input_rows]:
+    for row, incoming in [(r, False) for r in old_rows] + [(r, True) for r in input_rows]:
         pid = row['place_id']
         if replace_all and pid not in input_ids:
             continue
         target = metadata.setdefault(pid, {})
         # Missing CSV cells do not erase richer metadata already in the DB.
-        target.update({key: value for key, value in row.items() if key not in BLOG_COLUMNS and pd.notna(value)})
+        for key, value in row.items():
+            if key in BLOG_COLUMNS or key == ALIAS_COLUMN or pd.isna(value) or value == '':
+                continue
+            # A snapshot fills gaps. Only an explicit authoritative update can
+            # change existing metadata and invalidate current address evidence.
+            if not incoming or metadata_mode == 'update' or key not in target:
+                target[key] = value
+    # Recompute the alias of the chosen metadata, not that of a stale snapshot.
+    for pid, place in metadata.items():
+        alias = identity_key(place)
+        place['identity_key'] = alias
+        if _LOCAL_ID.fullmatch(alias):
+            aliases_per_id.setdefault(pid, set()).add(alias)
+            alias_candidates.setdefault(alias, set()).add(pid)
+
     hints, collected, quarantined = {}, {}, []
     # Catalog may be stale. Existing DB evidence takes precedence over its
     # same-URL copy; newly supplied valid tag records are an explicit update.
@@ -85,7 +123,8 @@ def merge_verified_tags(places, blog_tags, existing=None, replace_all=False):
         raw_pid = text(row.get('place_id'))
         # A still-present canonical ID always wins over an alias. An enriched
         # row must not redirect another known provider's existing proof.
-        pid = raw_pid if raw_pid in metadata else aliases.get(raw_pid, raw_pid)
+        matches = {pid for pid in alias_candidates.get(raw_pid, set()) if pid in metadata}
+        pid = raw_pid if raw_pid in metadata else next(iter(matches)) if len(matches) == 1 else raw_pid
         row['place_id'] = pid
         place = metadata.get(pid)
         if place is None and not tag_input:
@@ -108,10 +147,11 @@ def merge_verified_tags(places, blog_tags, existing=None, replace_all=False):
             has_posts = text(row.get('verified_posts')) not in ('', '[]', 'null')
             # Explicit failed collection records retain their audit trail too.
             if has_tags or has_posts or tag_input:
-                quarantined.append({**row, 'quarantine_reason': 'unproven_or_unknown_identity'})
+                quarantined.append({**row, 'quarantine_reason': 'ambiguous_identity_alias' if len(matches) > 1 and raw_pid not in metadata else 'unproven_or_unknown_identity'})
     columns = list(dict.fromkeys([c for c in combined.columns if c not in BLOG_COLUMNS] +
                                 ['place_id', 'identity_key', '가게명', '주소', '카테고리']))
     result = pd.DataFrame(list(metadata.values()), columns=columns)
+    result[ALIAS_COLUMN] = [json.dumps(sorted(aliases_per_id.get(pid, set())), ensure_ascii=False) for pid in result['place_id']]
     result['blog_tags'], result['verified_posts'] = '{}', '[]'
     result['blog_tag_status'] = [hints.get(pid, 'needs_collection') for pid in result['place_id']]
     for idx, row in result.iterrows():
@@ -190,11 +230,11 @@ def write_database(df, path, quarantine=None, preserve=False):
     return backup
 
 
-def build(places_path=PLACES_CSV, tags_path=BLOG_TAGS_CSV, db_path=DB_PATH, replace_all=False):
+def build(places_path=PLACES_CSV, tags_path=BLOG_TAGS_CSV, db_path=DB_PATH, replace_all=False, metadata_mode='snapshot'):
     places = _read_csv(places_path)
     tags = _read_csv(tags_path) if Path(tags_path).exists() else pd.DataFrame()
     previous = read_database(db_path)
-    df, quarantine = merge_verified_tags(places, tags, existing=previous, replace_all=replace_all)
+    df, quarantine = merge_verified_tags(places, tags, existing=previous, replace_all=replace_all, metadata_mode=metadata_mode)
     # Count true removals after local-to-provider identity promotion.
     combined = ensure_ids(_combine_metadata(previous, places))
     previous_ids = set(combined.iloc[:len(previous)]['place_id'])
@@ -205,7 +245,7 @@ def build(places_path=PLACES_CSV, tags_path=BLOG_TAGS_CSV, db_path=DB_PATH, repl
     backup = write_database(df, db_path, audit, preserve=True)
     stats = {'places': len(df), 'input_places': len(places),
              'verified_places': int(df['blog_tag_status'].eq('verified').sum()),
-             'mode': 'replace_all' if replace_all else 'upsert',
+             'mode': 'replace_all' if replace_all else 'upsert', 'metadata_mode': metadata_mode,
              'removed_place_ids': removed, 'quarantined_tag_records': len(audit),
              'backup': str(backup) if backup else None}
     print(json.dumps(stats, ensure_ascii=False, indent=2))
@@ -219,5 +259,7 @@ if __name__ == '__main__':
     parser.add_argument('--db', type=Path, default=DB_PATH)
     parser.add_argument('--replace-all', action='store_true',
                         help='명시적 전체 교체: --places에 없는 장소를 삭제합니다. 기본값은 기존 장소 보존 갱신입니다.')
+    parser.add_argument('--update-metadata', action='store_true', help='명시적 메타데이터 갱신: 기존 주소·이름 등을 덮어씁니다. 기본은 스냅샷 병합입니다.')
     args = parser.parse_args()
-    build(args.places, args.tags, args.db, replace_all=args.replace_all)
+    build(args.places, args.tags, args.db, replace_all=args.replace_all,
+          metadata_mode='update' if args.update_metadata else 'snapshot')

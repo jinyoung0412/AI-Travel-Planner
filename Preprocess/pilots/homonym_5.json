@@ -1,0 +1,78 @@
+{
+  "pilot_id": "homonym-5-20261015",
+  "selection_frozen_at": "2026-10-15",
+  "max_places": 5,
+  "max_unique_posts_per_place": 30,
+  "baseline_db_sha256": "6e51a45748c26ef6d4239974950098291249246b5f0ae0146b919fabe9d6b3be",
+  "baseline_place_count": 13745,
+  "baseline_quarantine_count": 12144,
+  "collection_authorized_now": false,
+  "execution_decision": "user_requested_preparation_only",
+  "targets": [
+    {
+      "place_id": "local:v1:e7bbe124bb6a418ee9538dcc1453fb1a01e06d874d1381be8d30de1e2ca4bf3c",
+      "identity_key": "local:v1:e7bbe124bb6a418ee9538dcc1453fb1a01e06d874d1381be8d30de1e2ca4bf3c",
+      "가게명": "멜버른커피하우스",
+      "주소": "충남 천안시 서북구 불당34길 3-16 1층 멜버른커피하우스",
+      "카테고리": "카페",
+      "latitude": 36.80624127,
+      "longitude": 127.105567,
+      "방문자수": 637,
+      "블로그수": 385,
+      "selection_reason": "동일 이름의 불당·입장 카페 분리. 리뷰 근거가 있는 도로명 주소 표본.",
+      "identity_verification": "stored_database_metadata; live verification pending"
+    },
+    {
+      "place_id": "local:v1:0b489cfa5b821f746c3ce36774c82b6b0351f91434794c8754e0c302b93db25c",
+      "identity_key": "local:v1:0b489cfa5b821f746c3ce36774c82b6b0351f91434794c8754e0c302b93db25c",
+      "가게명": "멜버른커피하우스",
+      "주소": "충남 천안시 서북구 입장면 입장천변1길 6 1층",
+      "카테고리": "카페,디저트",
+      "latitude": 36.91557656,
+      "longitude": 127.2219155,
+      "방문자수": 202,
+      "블로그수": 20,
+      "selection_reason": "같은 이름의 다른 주소·좌표를 갖는 입장 카페. 불당점과 혼입 여부 비교.",
+      "identity_verification": "stored_database_metadata; live verification pending"
+    },
+    {
+      "place_id": "local:v1:1248cc10b1fd76f74d73fea84feb92eb41d98de8bbe23cf4f73bfba60f03dca2",
+      "identity_key": "local:v1:1248cc10b1fd76f74d73fea84feb92eb41d98de8bbe23cf4f73bfba60f03dca2",
+      "가게명": "카페오늘",
+      "주소": "충남 아산시 음봉면 아산온천로 222 B동 카페오늘",
+      "카테고리": "카페,디저트",
+      "latitude": 36.85319449,
+      "longitude": 126.9808115,
+      "방문자수": 129,
+      "블로그수": 9,
+      "selection_reason": "동일 이름이 천안·아산에 있는 카페. 시·도로명 검증 비교.",
+      "identity_verification": "stored_database_metadata; live verification pending"
+    },
+    {
+      "place_id": "local:v1:a43c5920ecdc830a77ced3586ebc9884e6c3e2dca1915b4e1e7b441865389f24",
+      "identity_key": "local:v1:a43c5920ecdc830a77ced3586ebc9884e6c3e2dca1915b4e1e7b441865389f24",
+      "가게명": "카페오늘",
+      "주소": "충남 천안시 서북구 성성8로 2-15 1동 1층 109호",
+      "카테고리": "카페",
+      "latitude": 36.83981339,
+      "longitude": 127.1301584,
+      "방문자수": 201,
+      "블로그수": 34,
+      "selection_reason": "같은 이름의 천안 카페. 아산 표본과 독립 ID로 수집·반영.",
+      "identity_verification": "stored_database_metadata; live verification pending"
+    },
+    {
+      "place_id": "local:v1:767187908ee36c628597b49b4a9ada20700948257e3785c949e7364b165a41e8",
+      "identity_key": "local:v1:767187908ee36c628597b49b4a9ada20700948257e3785c949e7364b165a41e8",
+      "가게명": "일미식당",
+      "주소": "충남 아산시 도고면 도고온천로 182",
+      "카테고리": "한식",
+      "latitude": 36.76478889,
+      "longitude": 126.8844095,
+      "방문자수": 284,
+      "블로그수": 60,
+      "selection_reason": "기존 수원 태그 혼입 사례의 아산 도고 한식당. 실패·빈 결과도 그대로 남기는 진단 표본.",
+      "identity_verification": "stored_database_metadata; live verification pending"
+    }
+  ]
+}

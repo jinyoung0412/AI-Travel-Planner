@@ -216,3 +216,103 @@ def test_known_provider_identity_is_not_redirected_by_an_enriched_row(places):
     assert set(by_id.index) == {'naver:1', 'naver:2'}
     assert by_id.loc['naver:1', 'blog_tag_status'] == 'verified'
     assert by_id.loc['naver:2', 'verified_posts'] == '[]'
+
+
+def test_stale_catalog_does_not_restore_old_address_or_tags(tmp_path, places):
+    source = places.head(1).copy()
+    source['provider'], source['provider_place_id'] = 'naver', '123'
+    source = ensure_ids(source)
+    first = source.iloc[0].to_dict()
+    stale, _ = merge_verified_tags(source, pd.DataFrame([{
+        'place_id': first['place_id'], 'blog_tag_status': 'verified',
+        'verified_posts': json.dumps([sample_post(first, 'old')])}]))
+    current = stale.copy()
+    current['주소'] = '충남 천안시 서부중앙로 20'
+    fresh = current.iloc[0].to_dict()
+    current['verified_posts'] = json.dumps([sample_post(fresh, 'fresh')], ensure_ascii=False)
+    current['blog_tags'] = '{"fresh-tag":1}'
+    db = tmp_path / 'places.db'
+    write_database(current, db)
+    stale.to_csv(tmp_path / 'old_catalog.csv', index=False)
+    build(tmp_path / 'old_catalog.csv', tmp_path / 'absent_tags.csv', db)
+    actual = read_places(db).iloc[0]
+    assert actual['주소'] == fresh['주소']
+    assert json.loads(actual['blog_tags']) == {'fresh-tag': 1}
+    assert json.loads(actual['verified_posts']) == [sample_post(fresh, 'fresh')]
+
+
+def test_late_local_id_collection_survives_a_later_provider_id_build(tmp_path, places):
+    source = ensure_ids(places.head(1))
+    local = source.iloc[0].to_dict()
+    old, _ = merge_verified_tags(source, pd.DataFrame([{
+        'place_id': local['place_id'], 'blog_tag_status': 'verified',
+        'verified_posts': json.dumps([sample_post(local, 'old')])}]))
+    enriched = source.copy()
+    enriched['provider'], enriched['provider_place_id'] = 'naver', '123'
+    promoted, _ = merge_verified_tags(enriched, pd.DataFrame(), existing=old)
+    assert promoted.iloc[0]['place_id'] == 'naver:123'
+    db = tmp_path / 'places.db'
+    write_database(promoted, db)
+    promoted.to_csv(tmp_path / 'catalog.csv', index=False)
+    pd.DataFrame([{'place_id': local['place_id'], 'blog_tag_status': 'verified',
+                   'verified_posts': json.dumps([sample_post(local, 'late')])}]).to_csv(tmp_path / 'late.csv', index=False)
+    build(tmp_path / 'catalog.csv', tmp_path / 'late.csv', db)
+    actual = read_places(db).iloc[0]
+    assert json.loads(actual['blog_tags']) == {'late-tag': 1, 'old-tag': 1}
+
+
+def test_explicit_metadata_update_invalidates_old_address_proof(places):
+    source = places.head(1).copy()
+    source['provider'], source['provider_place_id'] = 'naver', '123'
+    source = ensure_ids(source)
+    first = source.iloc[0].to_dict()
+    initial, _ = merge_verified_tags(source, pd.DataFrame([{
+        'place_id': first['place_id'], 'blog_tag_status': 'verified',
+        'verified_posts': json.dumps([sample_post(first)])}]))
+    changed = source.copy()
+    changed['주소'] = '충남 천안시 새주소로 20'
+    result, quarantine = merge_verified_tags(changed, pd.DataFrame(), existing=initial, metadata_mode='update')
+    assert result.iloc[0]['주소'] == changed.iloc[0]['주소']
+    assert result.iloc[0]['blog_tags'] == '{}'
+    assert len(quarantine) == 1
+    assert first['identity_key'] in json.loads(result.iloc[0]['identity_aliases'])
+
+
+def test_shared_local_alias_never_mixes_two_known_providers(places):
+    local = ensure_ids(places.head(1))
+    local_place = local.iloc[0].to_dict()
+    providers = pd.concat([local, local], ignore_index=True)
+    providers['provider'], providers['provider_place_id'] = 'naver', ['1', '2']
+    canonical, _ = merge_verified_tags(providers, pd.DataFrame())
+    # Round-trip without the original local row: ambiguous aliases stay ambiguous.
+    result, quarantine = merge_verified_tags(canonical, pd.DataFrame([{
+        'place_id': local_place['place_id'], 'blog_tag_status': 'verified',
+        'verified_posts': json.dumps([sample_post(local_place)])}]), existing=canonical)
+    assert set(result['place_id']) == {'naver:1', 'naver:2'}
+    assert result['blog_tags'].eq('{}').all()
+    assert quarantine['quarantine_reason'].tolist() == ['ambiguous_identity_alias']
+
+
+def test_persisted_alias_survives_address_update_and_migration(tmp_path, places):
+    local = ensure_ids(places.head(1))
+    old_key = local.iloc[0]['place_id']
+    enriched = local.copy()
+    enriched['provider'], enriched['provider_place_id'] = 'naver', '123'
+    promoted, _ = merge_verified_tags(enriched, pd.DataFrame(), existing=local)
+    changed = promoted.copy()
+    changed['주소'] = '충남 천안시 새주소로 20'
+    updated, _ = merge_verified_tags(changed, pd.DataFrame(), existing=promoted, metadata_mode='update')
+    db = tmp_path / 'places.db'
+    write_database(updated, db)
+    migrate(db, tmp_path / 'export', apply=True)
+    persisted = read_places(db)
+    current = persisted.iloc[0].to_dict()
+    valid = sample_post(current, 'current')
+    wrong = sample_post(local.iloc[0].to_dict(), 'stale')
+    result, quarantine = merge_verified_tags(persisted, pd.DataFrame([{
+        'place_id': old_key, 'blog_tag_status': 'verified',
+        'verified_posts': json.dumps([valid, wrong])}]), existing=persisted)
+    assert len(result) == 1
+    assert json.loads(result.iloc[0]['blog_tags']) == {'current-tag': 1}
+    assert json.loads(result.iloc[0]['verified_posts']) == [valid]
+    assert quarantine['quarantine_reason'].tolist() == ['partially_invalid_post_evidence']
