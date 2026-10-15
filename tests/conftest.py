@@ -9,10 +9,16 @@ sys.path.insert(0, str(ROOT / 'Flask_server'))
 
 @pytest.fixture(autouse=True)
 def no_external_calls(monkeypatch):
+    import socket
+    import httpx
     import requests
     def fail(*args, **kwargs):
         raise AssertionError('External API calls are forbidden in offline tests')
     monkeypatch.setattr(requests.sessions.Session, 'request', fail)
+    monkeypatch.setattr(httpx.Client, 'send', fail)
+    monkeypatch.setattr(httpx.AsyncClient, 'send', fail)
+    monkeypatch.setattr(socket.socket, 'connect', fail)
+    monkeypatch.setattr(socket.socket, 'connect_ex', fail)
     import app
     monkeypatch.setattr(app, '_call_claude', fail)
 
