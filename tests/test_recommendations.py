@@ -4,6 +4,26 @@ import pandas as pd
 import pytest
 import app
 from recommendation_ai import generate_from_slots, generate_fixed_courses, search_courses, route_metrics, add_scores
+
+
+def test_direct_scoring_ignores_unverified_tags(places):
+    p = places.head(3).copy()
+    p['blog_tags'] = '{"조용한카페": 1}'
+    assert add_scores(p, ['조용한'])['tag_score'].eq(0).all()
+    p['blog_tag_status'] = ['verified', 'legacy_unverified', 'fetch_error']
+    assert add_scores(p, ['조용한'])['tag_score'].tolist() == [1, 0, 0]
+
+
+def test_synthetic_verified_taste_changes_rank_with_same_candidates(places):
+    p = places.head(2).copy()
+    p['카테고리'], p['방문자수'], p['블로그수'] = '카페', 0, 0
+    p['blog_tag_status'] = 'verified'
+    p['blog_tags'] = ['{"조용한":1}', '{"활기찬":1}']
+    quiet = add_scores(p, ['조용한'])
+    lively = add_scores(p, ['활기찬'])
+    assert quiet['tag_score'].tolist() == [1, 0]
+    assert lively['tag_score'].tolist() == [0, 1]
+    assert quiet['score'].idxmax() == 0 and lively['score'].idxmax() == 1
 from clustering_ai import perform_clustering
 
 ORIGIN = (36.8151, 127.1139)
