@@ -19,6 +19,10 @@ def main():
     parser.add_argument('--check', action='store_true')
     parser.add_argument('--stage', choices=STAGES)
     args, stage_args = parser.parse_known_args()
+    if args.check and args.stage:
+        parser.error('--check와 --stage는 함께 사용할 수 없습니다.')
+    if (args.check or not args.stage) and stage_args:
+        parser.error('단계 없는 추가 인자: ' + ' '.join(stage_args))
     if args.check or not args.stage:
         missing = [str(path) for path in STAGES.values() if not path.is_file()]
         if missing:

@@ -2,6 +2,7 @@
 import argparse
 import ast
 import json
+import hashlib
 import sqlite3
 import subprocess
 import sys
@@ -17,6 +18,7 @@ sys.path.insert(0, str(ROOT / 'Flask_server'))
 sys.path.insert(0, str(ROOT))
 import app
 from recommendation_ai import route_metrics
+from place_identity import quarantine_legacy
 
 
 def forbidden(*args, **kwargs):
@@ -36,7 +38,7 @@ def baseline(backup):
     for node in tree.body:
         if isinstance(node, ast.FunctionDef) and node.name in ('filter_radius', '_tag_has_any', 'filter_keywords'):
             exec(compile(ast.Module(body=[node], type_ignores=[]), '<baseline_filters>', 'exec'), scope)
-    with sqlite3.connect(backup) as conn:
+    with sqlite3.connect(Path(backup).resolve().as_uri() + '?mode=ro', uri=True) as conn:
         old = pd.read_sql('select * from places where 지역 = \'천안\'', conn)
     radius = scope['filter_radius'](old, 36.8151, 127.1139, '대중교통')
     np.random.seed(42)
@@ -55,10 +57,19 @@ def main():
     app._call_claude = forbidden
     import requests
     requests.sessions.Session.request = forbidden
-    df = app.get_df()
-    with sqlite3.connect(app.DB_PATH) as conn:
+    source = Path(app.DB_PATH).resolve()
+    source_hash = hashlib.sha256(source.read_bytes()).hexdigest()
+    with sqlite3.connect(source.as_uri() + '?mode=ro', uri=True) as conn:
+        df = quarantine_legacy(pd.read_sql('select * from places', conn)).drop_duplicates('place_id')
         quarantined = conn.execute('select count(*) from blog_tags_quarantine').fetchone()[0]
         integrity = conn.execute('pragma integrity_check').fetchone()[0]
+    # Exercise the HTTP contract against the audited snapshot without opening a
+    # writable operational connection inside the application.
+    def audited_frame(region=''):
+        if region and region != '내 주변':
+            return df[df['지역'].eq(region)].copy()
+        return df.copy()
+    app.get_df = audited_frame
     payload = {'user_lat': 36.8151, 'user_lng': 127.1139, 'transport': '대중교통', 'region': '천안',
                'slot_types': ['음식', '자연·산책', '카페'], 'spot_count': 3, 'count': 5,
                'persona_tags': [], 'seed': 42}
@@ -81,7 +92,13 @@ def main():
     samples = df[df['가게명'].isin(['아지트', '일미식당'])]
     assert len(samples) == 12 and samples['place_id'].nunique() == 12
     assert samples['blog_tags'].eq('{}').all()
-    report = {'offline': True, 'origin': payload, 'db_integrity': integrity,
+    assert integrity == 'ok'
+    source_hash_after = hashlib.sha256(source.read_bytes()).hexdigest()
+    assert source_hash_after == source_hash, 'Operational DB changed during audit'
+    report = {'offline': True, 'source_sha256_before': source_hash,
+              'source_sha256_after': source_hash_after,
+              'verified_places': int(df['blog_tag_status'].eq('verified').sum()),
+              'origin': payload, 'db_integrity': integrity,
               'place_count': len(df), 'unique_ids': df['place_id'].nunique(),
               'quarantine_rows': quarantined, 'contamination_samples': samples[
                   ['place_id', '가게명', '주소', 'blog_tag_status', 'blog_tags']].to_dict('records'),
