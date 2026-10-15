@@ -5,10 +5,20 @@ function normalize(value) {
 }
 
 function addressAnchor(value) {
-    const text = normalize(value);
-    const city = text.match(/([가-힣]+시)(?: |$)/)?.[1];
-    const road = text.match(/([가-힣0-9·]+(?:로|길))\s+(\d+(?:-\d+)?)(?![\d-])/);
-    return city && road ? `${city}|${road[1]}|${road[2]}` : null;
+    // Same token/whitespace contract as blog_evidence.py; shared JSON fixtures
+    // exercise both implementations. Address fields contain one place address.
+    const text = normalize(value).toLowerCase();
+    const cities = [...text.matchAll(/(?<![가-힣a-z0-9_])([가-힣]+시)(?![가-힣a-z0-9_])/g)];
+    for (let i = 0; i < cities.length; i++) {
+        const city = cities[i];
+        const start = city.index + city[0].length;
+        const end = Math.min(start + 250, cities[i + 1]?.index ?? text.length);
+        const road = text.slice(start).match(
+            /(?<![가-힣a-z0-9_·])([가-힣a-z0-9·]+(?:로|길))\s*(\d+(?:\s*-\s*\d+)?)(?![가-힣a-z0-9_-]|\s*-)/
+        );
+        if (road && start + road.index + road[0].length <= end) return `${city[1]}|${road[1]}|${road[2].replace(/\s+/g, '')}`;
+    }
+    return null;
 }
 
 function distanceM(lat, lng, doc) {

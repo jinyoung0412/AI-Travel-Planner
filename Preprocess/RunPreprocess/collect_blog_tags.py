@@ -18,7 +18,7 @@ from tqdm import tqdm
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 from place_identity import ensure_ids, text
-from blog_evidence import address_anchor, name_matches, provider_url_matches, tags_from_posts
+from blog_evidence import address_evidence_excerpt, name_matches, provider_url_matches, tags_from_posts
 
 load_dotenv(ROOT / '.env')
 INPUT_CSV = ROOT / 'Preprocess/data/processed/chungnam_places_filtered.csv'
@@ -49,16 +49,14 @@ def fetch_post(url, place, query):
         return None
     body_text = body.get_text(' ', strip=True)
     name = text(place['가게명'])
-    anchor = address_anchor(place)
     # Keep short source excerpts, including separate name/address paragraphs.
     paragraphs = [p.get_text(' ', strip=True) for p in body.select('p, div.se-text-paragraph')]
     paragraphs = paragraphs or [body_text]
     name_excerpt = next((p[:1000] for p in paragraphs if name_matches(name, p)), '')
-    road_name = anchor[1].rsplit(' ', 1)[0] if anchor else ''
-    addr_paragraph = next((p for p in paragraphs if road_name and road_name in p), '')
-    # City may be in the preceding line of the post: preserve local context.
-    index = body_text.find(addr_paragraph) if addr_paragraph else -1
-    address_excerpt = body_text[max(0, index - 200):index + len(addr_paragraph) + 200][:1500] if index >= 0 else ''
+    # Select an actual matching address span; a road-name substring in an
+    # unrelated paragraph must not become identity evidence. City/road may be
+    # split across adjacent lines, so inspect the normalized body as a whole.
+    address_excerpt = address_evidence_excerpt(place, body_text)
     tag_match = re.search(r'var gsTagName\s*=\s*"([^"]*)"', response.text)
     tags = [t.strip() for t in tag_match.group(1).split(',') if t.strip()] if tag_match else []
     pid = text(place.get('provider_place_id'))
