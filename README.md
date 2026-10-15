@@ -17,7 +17,8 @@
 ```text
 android_app/                  Flutter 화면·저장·API 클라이언트
 NodeJs_server/                Express 게이트웨이·Kakao 상세 조회 (8080)
-Flask_server/                 Flask API·추천·군집 진단 (5001), places.db
+Flask_server/                 Flask API·군집 진단 (5001), places.db
+Flask_server/recommender/     추천 점수·좌표 거리·슬롯 탐색 (기존 recommendation_ai 호환)
 Preprocess/RunPreprocess/     수집·전처리·DB 구축·마이그레이션·파일럿
 Preprocess/crawler/           Naver Map 브라우저 수집
 place_identity.py             장소 ID·별칭
@@ -41,7 +42,7 @@ npm --prefix NodeJs_server ci
 cp .env.example .env
 
 python Flask_server/app.py
-node NodeJs_server/server.js
+npm --prefix NodeJs_server start
 (cd android_app && flutter run)
 ```
 
@@ -56,7 +57,21 @@ Python 라이브러리는 `environment.yml`, Node와 Flutter의 정확한 의존
 | `NAVER_API_ID`, `NAVER_API_SECRET` | 블로그 검색 | 실제 수집 실행 불가 |
 | `TRAVEL_DATA_DIR` | 브라우저 수집 CSV 출력 | 기본 `Preprocess/data/chungnam_data` |
 
-앱의 기본 게이트웨이 주소는 Android 에뮬레이터용 `http://10.0.2.2:8080`입니다. 다른 실행 대상은 앱 API 설정을 확인해 호스트 주소를 지정하세요. 서버를 먼저 실행해야 합니다.
+앱의 기본 게이트웨이 주소는 Android 에뮬레이터용 `http://10.0.2.2:8080`입니다. `flutter run --dart-define=API_BASE_URL=http://<호스트>:8080`으로 다른 주소를 지정할 수 있습니다. LAN 개발에서는 Node의 `NODE_HOST`도 접근 가능한 인터페이스로 지정해야 합니다. 서버를 먼저 실행해야 합니다. Flutter 검증 대상은 Android 개발 앱입니다. debug/profile은 로컬 HTTP를 허용하며 release는 HTTPS endpoint가 필요합니다. 다른 플랫폼·실기기·native Gradle 빌드는 검증하지 않았습니다.
+
+추가 설정은 `.env.example`의 주석에 기본값으로 제공합니다. 서버를 재시작해 적용합니다.
+
+| 설정 | 기본값·동작 |
+|---|---|
+| `FLASK_HOST`, `FLASK_PORT`, `FLASK_DEBUG` | `127.0.0.1`, `5001`, false |
+| `PLACES_DB_PATH` | 기본 저장소 DB; 상대 경로는 실행 cwd 기준, 항상 읽기 전용 |
+| `ANTHROPIC_MODEL`, `LLM_TIMEOUT_SECONDS` | `claude-haiku-4-5-20251001`, I/O 4초(최대 10초), 총 시도 최대 2회 |
+| `FLASK_BASE_URL`, `FLASK_TIMEOUT_MS` | Node의 Flask 대상 `http://127.0.0.1:5001`, 30,000ms(최대 120,000ms) |
+| `NODE_HOST`, `NODE_PORT` / `PORT` | `127.0.0.1`, `8080`; NODE_PORT 우선 |
+| `CORS_ORIGINS` | 기본 비어 있음; 필요한 브라우저 origin만 쉼표로 지정 |
+| Flutter `API_BASE_URL` | 빌드 시 `--dart-define`로 전달, `.env`는 읽지 않음 |
+
+Dart의 본문 수신 포함 deadline은 35초이며 timeout 시 기저 요청도 취소합니다. 서버 timeout을 늘리면 클라이언트 deadline도 함께 검토하세요. 기본 Flask 실행기는 개발용이며 운영 WSGI 배포를 구성한 것은 아닙니다.
 
 ## 키 없는 회귀검사
 
@@ -66,9 +81,10 @@ python scripts/check_offline.py
 python scripts/check_offline.py --component python
 python scripts/check_offline.py --component node
 python scripts/check_offline.py --component flutter
+python scripts/check_offline.py --component gateway
 ```
 
-설치된 의존성을 사용합니다. 검사 과정에서 패키지를 내려받거나 실제 수집을 시작하지 않습니다. Python 전체 회귀, 알고리즘 smoke, 전처리 경로 검사, 실제 DB 읽기 전용 감사, 임시 DB 3회 재구축 보존 검사, Node 회귀·구문 검사, Flutter 분석·테스트를 실행합니다. DB와 고정 파일럿의 검사 전후 SHA-256을 비교합니다. Python 테스트의 HTTP·모델 호출은 mock하거나 차단하며 Node·Flutter도 외부 HTTP를 mock합니다. 세부 검증 범위·결과는 [통합 메모](docs/refactor-integration.md)에 기록합니다.
+설치된 의존성을 사용합니다. 검사 과정에서 패키지를 내려받거나 실제 수집을 시작하지 않습니다. Python 전체 회귀, 알고리즘 smoke, 전처리 경로 검사, 실제 DB 읽기 전용 감사, 임시 DB 3회 재구축 보존 검사, Node 회귀·구문 검사, Flask→Node 실제 loopback HTTP smoke, Flutter 분석·테스트를 실행합니다. loopback 검사는 외부 HTTP·모델 호출을 차단하고 임시 로컬 포트를 열었다가 닫습니다. DB와 고정 파일럿의 검사 전후 SHA-256을 비교합니다. Python 테스트의 HTTP·모델 호출은 mock하거나 차단하며 Node·Flutter도 외부 HTTP를 mock합니다. 세부 검증 범위·결과는 [통합 메모](docs/refactor-integration.md)에 기록합니다.
 
 개별 데이터 감사 결과는 `local_artifacts/real_db_validation.json`, `local_artifacts/review_fix_validation.json`에 남습니다. 후자의 검증된 2곳은 **임시 복사본에 주입한 모의 근거**이며 실제 수집 성과가 아닙니다. 검사 도중 생성한 임시 DB·백업은 정리합니다.
 
@@ -77,7 +93,7 @@ python scripts/check_offline.py --component flutter
 - 차량 반경 15km, 대중교통 반경 4.5km는 제품 탐색 범위이며 실제 접근성 판정이 아닙니다.
 - 실제 `카테고리`를 우선하고 비어 있을 때만 `search_category`를 사용합니다. 명시 종류가 없을 때만 취향 태그를 카테고리 힌트로 사용합니다. `닭갈비`와 `맛집 탐방`을 함께 입력해도 닭갈비 조건을 유지합니다.
 - `slot_types`는 `spot_count`와 길이가 같아야 합니다. 알려지지 않은 슬롯이나 불일치는 400이며 자르거나 채우지 않습니다. 생략 시 음식→활동→카페→활동→음식의 앞 3/4/5개를 사용합니다.
-- 코스는 기본 폭 256의 beam search와 부족한 조합을 보충하는 탐색을 사용합니다. 후보 배정 가능성을 확인하므로 군집 수 때문에 유효 코스가 잘리지 않습니다. seed 기본 0으로 동점을 처리하며 모델 확장 결과가 같으면 재현 가능합니다.
+- 후보 조합의 곱이 4,096 이하면 완전탐색하고, 큰 집합은 요청 폭 기본 256의 beam search를 후보량에 맞춰 줄입니다. 매칭으로 슬롯 배정 가능성을 확인하며 부족한 조합을 보충하므로 군집 수 때문에 유효 코스가 잘리지 않습니다. 엔진 직접 호출은 최대 16슬롯·100코스·beam 폭 1,024이며 앱 API는 3~5슬롯·최대 5코스를 지원합니다. seed 기본 0으로 동점을 처리하며 모델 확장 결과가 같으면 재현 가능합니다.
 
 ```text
 pop_score = MinMax(log1p(max(방문자수, 0) + max(블로그수, 0)))
@@ -92,7 +108,7 @@ route_cost = mean(구간 직선거리_km / 탐색반경_km + 1 - relevance)
 
 ## 장소 신원과 데이터 갱신
 
-`place_id`는 공급자 ID가 있으면 `naver:<id>`, 없으면 정규화한 이름+주소의 SHA-256인 `local:v1:<hash>`입니다. 주소가 없으면 이름+소수점 6자리 좌표를 사용하며 이름만으로 ID를 만들지 않습니다. 이름·주소는 공백 정리/소문자화하고 주소 앞 `충청남도`를 `충남`으로 통일합니다. `identity_key`와 `identity_aliases`는 공급자 ID 승격 전 로컬 ID 연결을 보존합니다. 서로 다른 공급자 ID와 여러 공급자를 가리키는 별칭은 자동 병합하지 않습니다. 이전·개명·도로명/지번 변환은 퍼지 매칭하지 않습니다.
+`place_id`는 공급자 ID가 있으면 `naver:<id>`, 없으면 정규화한 이름+주소의 SHA-256인 `local:v1:<hash>`입니다. 주소가 없으면 이름+소수점 6자리 좌표를 사용하며 이름만으로 ID를 만들지 않습니다. 이름·주소는 공백 정리/소문자화하고 주소 앞 `충청남도`를 `충남`으로 통일합니다. `identity_key`와 `identity_aliases`는 공급자 ID 승격 전 로컬 ID 연결을 보존합니다. `identity_alias_conflicts`는 여러 공급자가 공유했던 별칭의 충돌 이력을 보존해 한 공급자가 삭제돼도 잘못 연결되지 않게 합니다. API와 Flutter 저장도 이 별칭·충돌 이력을 함께 전달해 주소 변경 후 저장 연결을 유지합니다. 두 별칭 JSON 열은 CSV 왕복에서도 유지해야 합니다. 서로 다른 공급자 ID와 여러 공급자를 가리키는 별칭은 자동 병합하지 않습니다. 이전·개명·도로명/지번 변환은 퍼지 매칭하지 않습니다.
 
 블로그 검색에는 전체 이름·주소를 넣고 본문에서 온전한 이름과 시·도로명·건물번호를 확인합니다. 주소가 없으면 해당 공급자 장소 링크가 필요합니다. URL·검색어·수집 시각·일치 발췌·태그를 `verified_posts`에 보존하며 DB 적재 때 현재 메타데이터로 재검증합니다. 이름 단독 CSV는 연결하지 않습니다. `중앙로 10`과 `서부중앙로 10`, `중앙로 100`, `중앙로 10-2`, 다른 시 주소를 구분하고 정상 공백·개행·구 이름·층 표기는 허용합니다. 지원하지 않는 지번/본문 형식, 여러 장소를 소개한 글의 태그 적합성 등은 보수적 휴리스틱의 한계입니다. 주소 비교 사례는 Python·Node가 공유합니다.
 
@@ -104,6 +120,8 @@ route_cost = mean(구간 직선거리_km / 탐색반경_km + 1 - relevance)
 python Preprocess/RunPreprocess/migrate_place_ids.py          # dry-run
 python Preprocess/RunPreprocess/migrate_place_ids.py --apply  # 백업 후 적용
 ```
+
+WAL 모드 DB는 교체를 거부합니다. 모든 연결을 닫고 운영자가 오프라인으로 checkpoint와 DELETE 모드 전환을 확인한 뒤 재시도하세요. 읽은 뒤 원본 DB가 바뀌어도 적용하지 않습니다. 여러 내보내기 CSV와 DB 전체는 하나의 다중 파일 트랜잭션이 아니므로 내보내기 실패 시 백업을 확인해야 합니다.
 
 적용 시 `Flask_server/places.db.backup-<UTC시각>`에 전체 원본을 보관하고, 임시 DB 무결성 확인 후 원자적으로 교체합니다. `blog_tags_quarantine`에는 태그 원본과 사유를 보존합니다. `local_artifacts/migration/places_catalog.csv`는 **전체 목록**, `recollect_places.csv`는 **미검증 작업 목록**입니다. 백업·내보내기·원본 CSV는 gitignore 대상이라 새 clone에는 없습니다. 과거 로컬 백업이 자동 생성되어 있다고 가정하지 마세요. 복구는 서버를 멈추고 실제로 존재하는 검토된 백업을 DB 경로로 복사합니다. 복구한 legacy 태그도 검증되지 않으면 추천 메모리에서 제외합니다.
 
@@ -122,7 +140,7 @@ python Preprocess/RunPreprocess/build_database.py \
 
 의도적 삭제는 `--replace-all`로 별도 지정합니다. 입력에 없는 장소가 삭제되고 **빈 목록이면 전부 삭제됩니다.** 직전 전체 DB는 백업에 보존하고 `removed_place_ids`로 삭제 대상을 확인합니다. 먼저 임시 사본에서 검증하세요.
 
-`--stage crawl`은 실제 브라우저 수집, `--stage prepare`는 Kakao 지오코딩, `--stage blogs`는 Naver 블로그 요청입니다. 경로 검사와 달리 외부 요청이 발생하므로 이번 정리에서 실행하지 않았습니다. `--stage migrate`도 지원합니다. 완료 `.done`은 성공한 검색 작업 기준이며, 재수집 시 해당 완료 기록을 검토해야 합니다. CSV 중복은 장소 ID로 제거합니다. 수집 실패는 상태로 기록하고 재시도하며 이름 단독 legacy CSV를 새 스키마 파일에 append하지 않습니다.
+`--stage crawl`은 실제 브라우저 수집, `--stage prepare`는 Kakao 지오코딩, `--stage blogs`는 Naver 블로그 요청입니다. 경로 검사와 달리 외부 요청이 발생하므로 이번 정리에서 실행하지 않았습니다. `--stage migrate`도 지원합니다. 완료 `.done`은 최종 페이지 확인과 CSV 해시가 맞는 JSON v2만 재사용하며, 과거 단순 DONE 표시는 재점검합니다. CSV 중복은 장소 ID로 병합하며 비어 있지 않은 메타데이터와 유효 근거를 보존합니다. CSV 정제·중복 제거는 원본 백업 후 원자적으로 교체하고 미검증 근거는 `.quarantine.csv`에 남깁니다. 전처리 병합의 별도 감사 기록은 `preprocess_quarantine.csv`이며 생성된 격리 파일은 수집 원본으로 다시 읽지 않습니다. 블로그 수집은 장소별 `.audit` JSON으로 중단을 복구하고, 지오코딩은 성공 좌표 체크포인트를 재사용합니다. 수집 실패는 상태로 기록하고 재시도하며 이름 단독 legacy CSV를 새 스키마 파일에 append하지 않습니다.
 
 ### 고정 5곳 파일럿
 
@@ -130,7 +148,7 @@ python Preprocess/RunPreprocess/build_database.py \
 python Preprocess/RunPreprocess/blog_tag_pilot.py prepare
 ```
 
-`Preprocess/pilots/homonym_5.json`의 고정 ID·주소·좌표, DB 해시·행 수를 확인하고 `local_artifacts/homonym_5`에 준비 자료를 만듭니다. 수집 허용 값이 false라 `collect`는 요청 전에 중단합니다. 실제 수집 승인을 받은 별도 작업에서만 키와 허용 값을 설정하세요. 실패·빈 결과가 나와도 표본을 바꾸지 않습니다. 수집 후 사람이 `review.json`의 장소 신원과 실제 추출 태그의 부분집합인 취향 태그를 판정해야 합니다. `export-reviewed`는 검토 결과와 정확도 분모를 내보내며 DB는 변경하지 않습니다. 결과 반영은 전체 DB의 임시 사본에 먼저 적용해 ID·비대상 행·격리 기록·백업·반복 실행을 확인합니다.
+`Preprocess/pilots/homonym_5.json`의 고정 ID·주소·좌표, DB 해시·행 수를 확인하고 `local_artifacts/homonym_5`에 준비 자료를 만듭니다. 수집 허용 값이 false라 `collect`는 요청 전에 중단합니다. 실제 수집 승인을 받은 별도 작업에서만 키와 허용 값을 설정하세요. 실패·빈 결과가 나와도 표본을 바꾸지 않습니다. 이후 승인된 실제 수집에서 중단한 경우에만 `collect --resume`으로 기존 감사·수동 검토를 보존해 이어갑니다. 수집 후 사람이 `review.json`의 장소 신원과 실제 추출 태그의 부분집합인 취향 태그를 판정해야 합니다. `export-reviewed`는 검토 결과와 정확도 분모를 내보내며 DB는 변경하지 않습니다. 결과 반영은 전체 DB의 임시 사본에 먼저 적용해 ID·비대상 행·격리 기록·백업·반복 실행을 확인합니다.
 
 ## 기록과 담당
 
