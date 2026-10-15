@@ -111,7 +111,7 @@ python Preprocess/RunPreprocess/migrate_place_ids.py --apply  # 백업 후 적�
 
 ```bash
 python run_data_prep.py --check       # 기본 실행도 경로 확인만 수행
-python run_data_prep.py --stage build --help
+python Preprocess/RunPreprocess/build_database.py --help
 # 전체 목록과 일부 태그로 갱신 (외부 호출 없음, DB 변경·백업 생성)
 python Preprocess/RunPreprocess/build_database.py \
   --places local_artifacts/migration/places_catalog.csv \

@@ -25,6 +25,16 @@ def forbidden(*args, **kwargs):
     raise AssertionError('This validation is offline: external calls forbidden')
 
 
+def validate_output_path(output, protected):
+    """Reject symlink and hardlink aliases of audited source databases."""
+    output = Path(output)
+    for source in map(Path, protected):
+        if output.resolve() == source.resolve() or (
+            output.exists() and source.exists() and output.samefile(source)
+        ):
+            raise ValueError('Report output must not replace an audited source database')
+
+
 def baseline(backup):
     rec = types.ModuleType('baseline_recommendation')
     cluster = types.ModuleType('baseline_cluster')
@@ -58,6 +68,10 @@ def main():
     import requests
     requests.sessions.Session.request = forbidden
     source = Path(app.DB_PATH).resolve()
+    try:
+        validate_output_path(args.output, [source, *([args.baseline_db] if args.baseline_db else [])])
+    except ValueError as error:
+        parser.error(str(error))
     source_hash = hashlib.sha256(source.read_bytes()).hexdigest()
     with sqlite3.connect(source.as_uri() + '?mode=ro', uri=True) as conn:
         df = quarantine_legacy(pd.read_sql('select * from places', conn)).drop_duplicates('place_id')
