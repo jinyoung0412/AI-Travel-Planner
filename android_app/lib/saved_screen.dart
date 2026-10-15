@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'place_map_button.dart';
 import 'course_timeline.dart';
 import 'travel_data.dart';
+import 'preference_notice.dart';
 import 'local_storage_service.dart';
 
 class SavedScreen extends StatefulWidget {
@@ -306,6 +307,7 @@ class SavedScreenState extends State<SavedScreen>
                 style: TextStyle(fontSize: 13, color: Colors.grey.shade500),
               ),
               const SizedBox(height: 8),
+              PreferenceNotice(metadata: jsonObject(course['metadata'] ?? {})),
               Text(
                 distanceNotice(course['metric']),
                 style: TextStyle(fontSize: 12, color: Colors.grey.shade600),

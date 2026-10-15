@@ -1,0 +1,41 @@
+{
+  "legacy": {
+    "name": "카페오늘",
+    "address": "충남 천안시 중앙로 10",
+    "lat": 36.8,
+    "lng": 127.1,
+    "place_id": "local:v1:550ab185ad91d3eb7ecdb995b4b3b83bf39c274c439f752af5625fe1dff58deb",
+    "identity_key": "local:v1:550ab185ad91d3eb7ecdb995b4b3b83bf39c274c439f752af5625fe1dff58deb"
+  },
+  "canonical": {
+    "name": "카페오늘",
+    "address": "충남 천안시 중앙로 20",
+    "lat": 36.8,
+    "lng": 127.1,
+    "place_id": "naver:123",
+    "identity_key": "local:v1:5940232376e894abfdd37265fd0c70630b6486ebb2b873fd423404102bb794de",
+    "identity_aliases": [
+      "local:v1:550ab185ad91d3eb7ecdb995b4b3b83bf39c274c439f752af5625fe1dff58deb",
+      "local:v1:5940232376e894abfdd37265fd0c70630b6486ebb2b873fd423404102bb794de"
+    ],
+    "identity_alias_conflicts": {}
+  },
+  "conflicted": {
+    "name": "카페오늘",
+    "address": "충남 천안시 중앙로 10",
+    "lat": 36.8,
+    "lng": 127.1,
+    "place_id": "naver:123",
+    "identity_key": "local:v1:550ab185ad91d3eb7ecdb995b4b3b83bf39c274c439f752af5625fe1dff58deb",
+    "identity_aliases": [
+      "local:v1:550ab185ad91d3eb7ecdb995b4b3b83bf39c274c439f752af5625fe1dff58deb",
+      "local:v1:5940232376e894abfdd37265fd0c70630b6486ebb2b873fd423404102bb794de"
+    ],
+    "identity_alias_conflicts": {
+      "local:v1:550ab185ad91d3eb7ecdb995b4b3b83bf39c274c439f752af5625fe1dff58deb": [
+        "naver:123",
+        "naver:456"
+      ]
+    }
+  }
+}

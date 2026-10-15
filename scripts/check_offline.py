@@ -29,6 +29,8 @@ def commands(component, flutter):
         yield ['npm', 'test', '--prefix', 'NodeJs_server'], ROOT
         for path in sorted((ROOT / 'NodeJs_server').glob('*.js')):
             yield ['node', '--check', str(path)], ROOT
+    if component in ('all', 'gateway'):
+        yield [sys.executable, 'scripts/smoke_gateway.py'], ROOT
     if component in ('all', 'flutter'):
         yield [flutter, 'analyze', '--no-pub'], ROOT / 'android_app'
         yield [flutter, 'test', '--no-pub'], ROOT / 'android_app'
@@ -36,7 +38,7 @@ def commands(component, flutter):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--component', choices=('all', 'python', 'node', 'flutter'), default='all')
+    parser.add_argument('--component', choices=('all', 'python', 'node', 'gateway', 'flutter'), default='all')
     parser.add_argument('--flutter', default='flutter', help='Installed Flutter executable')
     args = parser.parse_args()
     hashes = {path: digest(path) for path in FROZEN}
@@ -46,6 +48,7 @@ def main():
     env = os.environ.copy()
     for key in ('ANTHROPIC_API_KEY', 'KAKAO_API_KEY', 'NAVER_API_ID', 'NAVER_API_SECRET'):
         env[key] = ''
+    env['PLACES_DB_PATH'] = str(FROZEN[0])
     try:
         for command, cwd in commands(args.component, args.flutter):
             print(f'[{cwd.relative_to(ROOT) or "."}] {" ".join(command)}', flush=True)

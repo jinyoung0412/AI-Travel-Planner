@@ -15,6 +15,7 @@ from tqdm import tqdm
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 from place_identity import ensure_ids, text
+from Preprocess.RunPreprocess.build_database import merge_verified_tags, _audit_frame, _read_csv
 from Preprocess.crawler.categories import CATEGORIES
 from Preprocess.crawler.http_client import get as _get
 from Preprocess.crawler.storage import atomic_output
@@ -72,6 +73,8 @@ def source_metadata(path):
 def read_sources(input_dir):
     frames = []
     for path in sorted(Path(input_dir).rglob('*.csv')):
+        if path.name.endswith('.quarantine.csv'):
+            continue
         # A malformed file aborts the stage instead of silently publishing a partial dataset.
         frame = pd.read_csv(path, encoding='utf-8-sig', dtype={'provider_place_id': str, 'place_id': str})
         if not {'가게명', '주소'}.issubset(frame.columns):
@@ -120,7 +123,14 @@ def run_pipeline(input_dir=None, output_dir=None, api_key=None):
     source_type = frame.get('category_source', pd.Series('', index=frame.index))
     quality = source_type.map({'provider': 2, 'search_fallback': 0}).fillna(1)
     frame = frame.assign(_provider_category=quality).sort_values('_provider_category', kind='stable')
-    frame = frame.drop_duplicates('place_id', keep='last').drop(columns='_provider_category')
+    frame, quarantine = merge_verified_tags(frame.drop(columns='_provider_category'),
+                                            pd.DataFrame(), metadata_mode='update')
+    if not quarantine.empty:
+        audit_path = output_dir / 'preprocess_quarantine.csv'
+        audit = _audit_frame(quarantine)
+        if audit_path.exists():
+            audit = pd.concat([_read_csv(audit_path), audit], ignore_index=True)
+        save_frame(audit_path, audit.drop_duplicates())
     frame['collection_sources'] = frame['place_id'].map(sources)
     if '카테고리' in frame:
         frame = frame[~frame['카테고리'].isin(EXCLUDE_CATEGORIES)]

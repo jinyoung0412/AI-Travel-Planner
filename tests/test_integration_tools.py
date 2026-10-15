@@ -61,3 +61,22 @@ def test_audit_output_cannot_overwrite_source_database(tmp_path, alias):
     with pytest.raises(ValueError, match='source database'):
         validate_output_path(output, [source])
     assert source.read_bytes() == b'preserved database'
+
+
+@pytest.mark.parametrize('alias', ['direct', 'symlink', 'hardlink'])
+def test_rebuild_audit_rejects_source_output_before_reading(tmp_path, monkeypatch, alias):
+    from scripts import validate_rebuild_preservation as audit
+    source = tmp_path / 'places.db'
+    source.write_bytes(b'preserved database')
+    output = tmp_path / 'report.json'
+    if alias == 'direct':
+        output = source
+    elif alias == 'symlink':
+        output.symlink_to(source)
+    else:
+        output.hardlink_to(source)
+    monkeypatch.setattr(sys, 'argv', ['audit', '--source-db', str(source), '--output', str(output)])
+    with pytest.raises(SystemExit) as error:
+        audit.main()
+    assert error.value.code == 2
+    assert source.read_bytes() == b'preserved database'

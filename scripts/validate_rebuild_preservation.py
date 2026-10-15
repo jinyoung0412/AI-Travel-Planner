@@ -49,6 +49,9 @@ def main():
     parser.add_argument('--source-db', type=Path, default=ROOT / 'Flask_server/places.db')
     parser.add_argument('--output', type=Path, default=ROOT / 'local_artifacts/review_fix_validation.json')
     args = parser.parse_args()
+    if (args.output.resolve() == args.source_db.resolve() or
+            (args.output.exists() and args.source_db.exists() and args.output.samefile(args.source_db))):
+        parser.error('Report output must not replace the source database')
     requests.sessions.Session.request = forbidden
     started = time.perf_counter()
     source_hash = digest(args.source_db)

@@ -2,20 +2,26 @@ import 'package:flutter/material.dart';
 import 'bookmark_button.dart';
 import 'place_map_button.dart';
 import 'travel_data.dart';
+import 'preference_notice.dart';
 import 'local_storage_service.dart';
 
 class SpotResultScreen extends StatelessWidget {
   final List<Map<String, dynamic>> places;
   final int requestedCount;
+  final Map<String, dynamic> metadata;
 
   const SpotResultScreen({
     super.key,
     required this.places,
     required this.requestedCount,
+    this.metadata = const {},
   });
 
   @override
   Widget build(BuildContext context) {
+    final evidenceBanner = metadata['preference_evidence'] == 'unavailable'
+        ? 1
+        : 0;
     return Scaffold(
       backgroundColor: const Color(0xFFFFF8F3),
       appBar: AppBar(
@@ -29,8 +35,15 @@ class SpotResultScreen extends StatelessWidget {
       ),
       body: ListView.builder(
         padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
-        itemCount: places.length + (places.length < requestedCount ? 1 : 0),
+        itemCount:
+            places.length +
+            (places.length < requestedCount ? 1 : 0) +
+            evidenceBanner,
         itemBuilder: (context, index) {
+          if (evidenceBanner == 1 && index == 0) {
+            return PreferenceNotice(metadata: metadata);
+          }
+          index -= evidenceBanner;
           if (index == 0 && places.length < requestedCount) {
             return Padding(
               padding: const EdgeInsets.only(bottom: 14),
