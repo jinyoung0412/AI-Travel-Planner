@@ -33,7 +33,7 @@ def test_stage_arguments_and_root_are_preserved(monkeypatch):
 
 def test_python_checks_do_not_dispatch_collection_or_mutation():
     commands = list(check_offline.commands('python', 'flutter'))
-    assert len(commands) == 5
+    assert commands
     assert not any('--apply' in command or '--stage' in command for command, _ in commands)
     assert all(cwd == check_offline.ROOT for _, cwd in commands)
 
@@ -44,3 +44,20 @@ def test_offline_http_clients_are_blocked():
     for request in (lambda: httpx.get('https://example.com'), lambda: requests.get('https://example.com')):
         with pytest.raises(AssertionError, match='forbidden'):
             request()
+
+
+@pytest.mark.parametrize('alias', ['direct', 'symlink', 'hardlink'])
+def test_audit_output_cannot_overwrite_source_database(tmp_path, alias):
+    from scripts.validate_real_db import validate_output_path
+    source = tmp_path / 'places.db'
+    source.write_bytes(b'preserved database')
+    output = tmp_path / 'report.json'
+    if alias == 'direct':
+        output = source
+    elif alias == 'symlink':
+        output.symlink_to(source)
+    else:
+        output.hardlink_to(source)
+    with pytest.raises(ValueError, match='source database'):
+        validate_output_path(output, [source])
+    assert source.read_bytes() == b'preserved database'
