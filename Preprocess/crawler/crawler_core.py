@@ -1,21 +1,22 @@
 import time
-import os
-import csv
-from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
+import logging
+import sys
 
 from Preprocess.crawler.driver import create_driver
 from Preprocess.crawler.iframe_utils import (
-    wait_for_list_panel, open_list_panel_force
+    wait_for_list_panel, lock_to_list_panel
 )
 from Preprocess.crawler.pagination import go_next_page
-from Preprocess.crawler.parser import extract_list_items, extract_name_element, parse_detail_page
+from Preprocess.crawler.parser import extract_list_items, extract_name_element, parse_detail_page, extract_provider_place_id
 from Preprocess.crawler.saver import (
     get_csv_path, save_item, touch_init_file,
     mark_task_completed, is_task_completed, DATA_DIR, load_existing_ids
 )
 from place_identity import place_id
 from Preprocess.crawler.throttler import throttle_click_delay, throttle_page_delay
+
+logger = logging.getLogger(__name__)
+
 
 class ChungnamCrawler:
     def __init__(self):
@@ -55,7 +56,7 @@ class ChungnamCrawler:
             try:
                 self.driver.quit()
             except Exception:
-                pass
+                logger.warning("Browser shutdown failed", exc_info=True)
             self.driver = None
 
     def open_naver_map(self):
@@ -64,14 +65,16 @@ class ChungnamCrawler:
             time.sleep(2)
 
     def search_keyword(self, keyword):
+        from selenium.webdriver.common.keys import Keys
         for _ in range(3):
             try:
                 self.driver.switch_to.default_content()
-                box = self.driver.find_element(By.CSS_SELECTOR, "input.input_search")
+                box = self.driver.find_element('css selector', "input.input_search")
                 # clear()는 React 기반 네이버 지도에서 내부 상태를 초기화하지 못함
-                # → Ctrl+A로 전체 선택 후 새 키워드 입력으로 대체
+                # → OS에 맞는 선택 단축키로 전체 선택 후 새 키워드 입력으로 대체
                 box.click()
-                box.send_keys(Keys.CONTROL + 'a')
+                modifier = Keys.COMMAND if sys.platform == 'darwin' else Keys.CONTROL
+                box.send_keys(modifier + 'a')
                 box.send_keys(keyword)
                 box.send_keys(Keys.ENTER)
                 time.sleep(2)
@@ -85,51 +88,47 @@ class ChungnamCrawler:
             return "ERROR"
         if wait_for_list_panel(self.driver, timeout=5): 
             return "OK"
-        open_list_panel_force(self.driver)
         if wait_for_list_panel(self.driver, timeout=5): 
             return "OK"
         return "ERROR"
 
     def scroll_list(self):
         self.driver.switch_to.default_content()
-        frames = self.driver.find_elements(By.ID, "searchIframe")
+        frames = self.driver.find_elements('id', "searchIframe")
         if not frames: 
             return False
         self.driver.switch_to.frame(frames[0])
 
-        try:
-            scroll_area = self.driver.find_element(By.ID, "_pcmap_list_scroll_container")
-        except Exception: 
+        scroll_area = lock_to_list_panel(self.driver)
+        if scroll_area is None:
             return False
-        
+
         for _ in range(5): 
             self.driver.execute_script("arguments[0].scrollTop = arguments[0].scrollHeight", scroll_area)
             time.sleep(0.5)
         return True
 
     def check_and_close_popup(self):
-        try:
-            if len(self.driver.window_handles) > 1:
-                self.driver.switch_to.window(self.driver.window_handles[-1])
-                self.driver.close()
-                self.driver.switch_to.window(self.driver.window_handles[0])
-                return True
-        except Exception: 
-            pass
+        if len(self.driver.window_handles) > 1:
+            self.driver.switch_to.window(self.driver.window_handles[-1])
+            self.driver.close()
+            self.driver.switch_to.window(self.driver.window_handles[0])
+            return True
         return False
 
     def load_existing_ids_for_region(self, region):
         existing = set()
         if DATA_DIR.exists():
             prefix = f'충남_{region.replace(" ", "_")}'
-            for path in DATA_DIR.glob(prefix + '*.csv'):
+            for path in DATA_DIR.glob(prefix + '_*.csv'):
                 existing.update(load_existing_ids(path))
         return existing
 
     def process_page(self, region, category, keyword, csv_path, existing, page):
         self.driver.switch_to.default_content()
-        wait_for_list_panel(self.driver)
-        frames = self.driver.find_elements(By.ID, "searchIframe")
+        if not wait_for_list_panel(self.driver):
+            raise RuntimeError("searchIframe unavailable")
+        frames = self.driver.find_elements('id', "searchIframe")
         if frames:
             self.driver.switch_to.frame(frames[0])
         time.sleep(2.0)
@@ -137,29 +136,35 @@ class ChungnamCrawler:
         initial_items = extract_list_items(self.driver)
         total_count = len(initial_items)
         if total_count == 0:
-            return 0
+            raise RuntimeError("No parseable list items; empty result or unsupported DOM")
 
         need_refresh = True
         current_items = []
-        new_count = 0  # 이 페이지에서 실제로 새로 저장한 항목 수
+        new_count = 0
+        failures = []
 
         for idx in range(total_count):
             try:
                 if need_refresh:
                     self.driver.switch_to.default_content()
-                    frames = self.driver.find_elements(By.ID, "searchIframe")
-                    if not frames: break
+                    frames = self.driver.find_elements('id', "searchIframe")
+                    if not frames:
+                        raise RuntimeError("searchIframe disappeared")
                     self.driver.switch_to.frame(frames[0])
                     current_items = extract_list_items(self.driver)
                     need_refresh = False
 
-                if idx >= len(current_items): break
+                if idx >= len(current_items):
+                    raise RuntimeError("Search list changed before all items were read")
                 item = current_items[idx]
                 el, name = extract_name_element(item)
 
                 if not name:
-                    continue
+                    raise RuntimeError("Place name unavailable")
 
+                provider_candidates = {extract_provider_place_id(link.get_attribute('href'))
+                                       for link in item.find_elements('tag name', 'a')} - {''}
+                expected_provider_id = next(iter(provider_candidates)) if len(provider_candidates) == 1 else ''
                 is_excluded = any(kw in name for kw in self.exclude_keywords)
                 if is_excluded:
                     continue
@@ -173,27 +178,30 @@ class ChungnamCrawler:
 
                 if self.check_and_close_popup():
                     self.driver.switch_to.default_content()
-                    frames = self.driver.find_elements(By.ID, "searchIframe")
+                    frames = self.driver.find_elements('id', "searchIframe")
                     if frames:
                         self.driver.switch_to.frame(frames[0])
                         retry_items = extract_list_items(self.driver)
                         if idx < len(retry_items):
                             retry_item = retry_items[idx]
-                            text_el = None
-                            try: text_el = retry_item.find_element(By.CSS_SELECTOR, "span.xBZDS")
-                            except Exception:
-                                try: text_el = retry_item.find_element(By.CSS_SELECTOR, "span.TYaxT")
-                                except Exception: pass
+                            text_el, _ = extract_name_element(retry_item)
                             if text_el:
                                 self.driver.execute_script("arguments[0].click();", text_el)
                                 time.sleep(1.5)
-                                if self.check_and_close_popup(): continue
-                            else: continue
-                    else: continue
+                                if self.check_and_close_popup():
+                                    raise RuntimeError("Repeated popup blocked place detail")
+                            else:
+                                raise RuntimeError("Popup recovery has no place link")
+                        else:
+                            raise RuntimeError("Popup recovery lost list item")
+                    else:
+                        raise RuntimeError("Popup recovery lost searchIframe")
 
                 cat, addr, v_rev, b_rev, op_time, provider_id = parse_detail_page(self.driver)
+                if expected_provider_id and provider_id != expected_provider_id:
+                    raise RuntimeError("Entry iframe identity does not match clicked list item")
                 if not addr and not provider_id:
-                    continue
+                    raise RuntimeError("Place identity unavailable")
                 identity = place_id({'name': name, 'address': addr,
                                      'provider': 'naver' if provider_id else '',
                                      'provider_place_id': provider_id})
@@ -202,6 +210,8 @@ class ChungnamCrawler:
                 save_item(csv_path, {
                     "page": page, "rank": idx + 1, "name": name,
                     "category": cat if cat else category, "address": addr,
+                    "search_region": region, "search_category": category,
+                    "category_source": "provider" if cat else "search_fallback",
                     "keyword": keyword, "visitor_review": v_rev,
                     "blog_review": b_rev, "operating_time": op_time,
                     "provider": "naver" if provider_id else "", "provider_place_id": provider_id
@@ -212,70 +222,66 @@ class ChungnamCrawler:
 
             except KeyboardInterrupt:
                 raise
-            except Exception:
+            except Exception as exc:
+                failures.append(type(exc).__name__)
+                logger.warning("Place parse/save failed: %s / %s / page %s / item %s (%s)",
+                               region, category, page, idx + 1, type(exc).__name__)
                 need_refresh = True
-                continue
             finally:
                 try:
                     self.driver.switch_to.default_content()
-                    frames = self.driver.find_elements(By.ID, "searchIframe")
+                    frames = self.driver.find_elements('id', "searchIframe")
                     if frames:
                         self.driver.switch_to.frame(frames[0])
-                except Exception:
-                    pass
+                except Exception as exc:
+                    failures.append(type(exc).__name__)
+                    logger.warning("Could not restore search iframe (%s)", type(exc).__name__)
 
-        # 이 페이지의 신규 저장 수. 다음 페이지에도 미수집 지점이 있을 수 있다.
+        if failures:
+            raise RuntimeError(f"Incomplete page: {len(failures)} failed items")
         return new_count
 
     def crawl_region_all_categories(self, region, categories, q=None):
-        existing_ids = self.load_existing_ids_for_region(region)
-
+        results = []
         try:
-            self.start_driver()
-            self.open_naver_map()
-        except Exception:
-            pass
-
-        processed_cats = 0
-
-        for category in categories:
-            try:
-                if is_task_completed(region, category):
-                    continue
-
-                if processed_cats > 0 and processed_cats % 1 == 0:
-                    try:
-                        self.stop_driver()
-                        self.start_driver()
-                        self.open_naver_map()
-                    except Exception:
-                        pass
-
-                keyword = f"{region} {category}"
-                csv_path = get_csv_path(region, category)
-                touch_init_file(csv_path)
-
-                if self.prepare_list(keyword) == "OK":
-                    page = 1
-                    while page <= 10:
-                        if not self.scroll_list(): break
-                        time.sleep(1.0)
-                        self.process_page(region, category, keyword, csv_path, existing_ids, page)
-                        self.driver.switch_to.default_content()
-                        self.driver.switch_to.frame("searchIframe")
-                        if not go_next_page(self.driver): break
+            for category in categories:
+                result = {'region': region, 'category': category, 'status': 'failed'}
+                try:
+                    if is_task_completed(region, category):
+                        result['status'] = 'skipped'
+                        continue
+                    # A fresh browser isolates broken sessions between categories.
+                    self.start_driver()
+                    self.open_naver_map()
+                    keyword = f"{region} {category}"
+                    csv_path = get_csv_path(region, category)
+                    touch_init_file(csv_path)
+                    # Deduplicate within a search, keeping category provenance in other CSVs.
+                    existing = load_existing_ids(csv_path)
+                    if self.prepare_list(keyword) != "OK":
+                        raise RuntimeError("Search list unavailable")
+                    for page in range(1, 11):
+                        if not self.scroll_list():
+                            raise RuntimeError("Search list could not be scrolled")
+                        self.process_page(region, category, keyword, csv_path, existing, page)
+                        if not go_next_page(self.driver):
+                            mark_task_completed(region, category)
+                            result['status'] = 'completed'
+                            break
+                        if page == 10:
+                            raise RuntimeError("Page limit reached before final page")
                         throttle_page_delay()
-                        page += 1
-
-                mark_task_completed(region, category)
-                processed_cats += 1
-
-            except KeyboardInterrupt:
-                raise
-            except Exception:
-                pass
-            finally:
-                if q:
-                    q.put(1)
-
-        self.stop_driver()
+                except KeyboardInterrupt:
+                    result['status'] = 'interrupted'
+                    raise
+                except Exception as exc:
+                    result['error_type'] = type(exc).__name__
+                    logger.warning("Crawl task failed: %s / %s (%s)", region, category, type(exc).__name__)
+                finally:
+                    results.append(result)
+                    if q is not None:
+                        q.put(1)  # Compatibility: this means finished, never succeeded.
+                    self.stop_driver()
+        finally:
+            self.stop_driver()
+        return results

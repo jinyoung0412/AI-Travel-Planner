@@ -1,122 +1,145 @@
-import sys
-import os
+"""Region workers report finished tasks separately from successful collection."""
+import argparse
 import multiprocessing
+import sys
 import time
-import datetime
-import gc  # 메모리 관리 모듈 추가
 from contextlib import redirect_stdout
+from pathlib import Path
+from queue import Empty
+import os
+import signal
 
-if sys.stdout.encoding.lower() != 'utf-8':
-    sys.stdout.reconfigure(encoding='utf-8')
-
-current_dir = os.path.dirname(os.path.abspath(__file__))
-src_dir = os.path.dirname(current_dir)
-project_dir = os.path.dirname(src_dir)
-sys.path.append(project_dir)
-
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
 from Preprocess.crawler.crawler_core import ChungnamCrawler
-
 from Preprocess.crawler.region_list import REGIONS
 from Preprocess.crawler.categories import CATEGORIES
 
+
 def run_worker_silent(args):
     region, categories, q = args
-    completed_in_worker = [0]
-    
+    crawler = None
+    finished = 0
+
     class QueueWrapper:
         def put(self, item):
-            completed_in_worker[0] += 1
-            q.put(item)
-            
-    # 크롤러 실행 전 메모리 정리
-    gc.collect()
-    
-    crawler = ChungnamCrawler()
+            nonlocal finished
+            finished += 1
+            q.put({'region': region, 'finished_categories': finished})
+
     try:
-        with open(os.devnull, 'w', encoding='utf-8') as fnull:
-            with redirect_stdout(fnull):
-                # 지역 하나가 끝나면 브라우저가 확실히 종료되도록 설계됨
-                crawler.crawl_region_all_categories(region, categories, QueueWrapper())
-    except Exception:
-        pass
+        crawler = ChungnamCrawler()
+        with open(os.devnull, 'w', encoding='utf-8') as sink, redirect_stdout(sink):
+            return crawler.crawl_region_all_categories(region, categories, QueueWrapper())
     finally:
-        while completed_in_worker[0] < len(categories):
-            q.put(1)
-            completed_in_worker[0] += 1
-        
-        if crawler.driver: 
-            try:
-                crawler.driver.quit()
-            except:
-                pass
-        # 작업 종료 후 명시적 메모리 해제
-        del crawler
-        gc.collect()
+        try:
+            while finished < len(categories):
+                q.put({'region': region, 'finished_categories': finished + 1})
+                finished += 1
+        finally:
+            if crawler is not None:
+                crawler.stop_driver()
 
-if __name__ == "__main__":
+
+def format_eta(seconds):
+    if seconds < 0:
+        return '--:--:--'
+    hours, rest = divmod(int(seconds), 3600)
+    minutes, seconds = divmod(rest, 60)
+    return f'{hours:02d}:{minutes:02d}:{seconds:02d}'
+
+
+def print_progress(completed, total, start_time):
+    elapsed = time.monotonic() - start_time
+    eta = format_eta(elapsed / completed * (total - completed)) if completed else '--:--:--'
+    fraction = completed / total if total else 1
+    filled = int(30 * fraction)
+    sys.stdout.write(f'\r진행률: [{"=" * filled}{"-" * (30 - filled)}] {fraction * 100:5.1f}% '
+                     f'({completed}/{total}) 경과: {format_eta(elapsed)} 남은시간: {eta}   ')
+    sys.stdout.flush()
+
+
+def _interrupt_worker(signum, frame):
+    raise KeyboardInterrupt()
+
+
+def _run_region(args, reports, region):
+    signal.signal(signal.SIGTERM, _interrupt_worker)
     try:
-        multiprocessing.set_start_method('spawn', force=True)
-    except RuntimeError: 
-        pass
+        reports[region] = run_worker_silent(args)
+    except (Exception, KeyboardInterrupt) as exc:
+        reports[region] = [{'region': region, 'category': category, 'status': 'failed',
+                            'error_type': type(exc).__name__} for category in args[1]]
 
-    total_subtasks = len(REGIONS) * len(CATEGORIES)
-    
-    core=5 #크롤링을 돌릴 코어 수 (본인 램 용량이나 CPU 사양에 따라 코어 수 조절.)
-    print(f"\n크롤링 작업을 시작합니다.(코어 갯수:{core})")
-    print(f"총 {total_subtasks}개의 세부 작업을 진행합니다.")
-    print("-" * 60)
 
-    manager = multiprocessing.Manager()
-    q = manager.Queue()
-    
-    pool = multiprocessing.Pool(processes=core, maxtasksperchild=1)
-    
-    tasks = [(region, CATEGORIES, q) for region in REGIONS]
+def supervise_regions(context, regions, categories, processes, q, reports, progress):
+    """Observe process exits directly, including os._exit/crashes without queue tokens."""
+    pending = iter(regions)
+    counts = {region: 0 for region in regions}
+    active, finished_reports = {}, []
+    started_all = False
+    try:
+        while active or not started_all:
+            while len(active) < processes and not started_all:
+                region = next(pending, None)
+                if region is None:
+                    started_all = True
+                    break
+                worker = context.Process(target=_run_region, args=((region, categories, q), reports, region))
+                worker.start()
+                active[region] = worker
+            try:
+                event = q.get(timeout=0.2)
+                if isinstance(event, dict) and event.get('region') in counts:
+                    region = event['region']
+                    counts[region] = max(counts[region], min(len(categories), event['finished_categories']))
+                    progress(sum(counts.values()))
+            except Empty:
+                pass
+            for region, worker in list(active.items()):
+                if worker.exitcode is None:
+                    continue
+                worker.join()
+                result = reports.get(region)
+                if (worker.exitcode != 0 or not isinstance(result, list) or len(result) != len(categories) or
+                        {row.get('category') for row in result} != set(categories)):
+                    result = [{'region': region, 'category': category, 'status': 'failed',
+                               'error_type': 'WorkerExit', 'exitcode': worker.exitcode} for category in categories]
+                finished_reports.extend(result)
+                counts[region] = len(categories)
+                progress(sum(counts.values()))
+                worker.close()
+                del active[region]
+    finally:
+        for worker in active.values():
+            if worker.is_alive():
+                worker.terminate()
+            worker.join(timeout=5)
+            if worker.is_alive():
+                worker.kill()
+                worker.join()
+            worker.close()
+    return finished_reports
 
-    for t in tasks:
-        pool.apply_async(run_worker_silent, (t,))
-    
-    pool.close()
 
-    def format_eta(seconds):
-        if seconds < 0:
-            return "--:--:--"
-        h = int(seconds // 3600)
-        m = int((seconds % 3600) // 60)
-        s = int(seconds % 60)
-        return f"{h:02d}:{m:02d}:{s:02d}"
+def main(processes=5):
+    if processes < 1:
+        raise ValueError('프로세스 수는 1 이상이어야 합니다.')
+    total = len(REGIONS) * len(CATEGORIES)
+    context = multiprocessing.get_context('spawn')
+    started = time.monotonic()
+    with context.Manager() as manager:
+        q, reports = manager.Queue(), manager.dict()
+        print_progress(0, total, started)
+        results = supervise_regions(context, REGIONS, CATEGORIES, processes, q, reports,
+                                    lambda n: print_progress(n, total, started))
+    failed = [report for report in results if report['status'] not in ('completed', 'skipped')]
+    print(f'\n종료: 성공/기존 완료 {len(results) - len(failed)}, 실패 {len(failed)} '
+          f'(소요시간: {format_eta(time.monotonic() - started)})')
+    return 1 if failed else 0
 
-    def print_progress(completed, total, start_time):
-        bar_length = 30
-        filled = int(bar_length * completed // total)
-        bar = '=' * filled + '-' * (bar_length - filled)
-        percent = completed / total * 100
 
-        elapsed = time.time() - start_time
-        if completed > 0:
-            eta = elapsed / completed * (total - completed)
-            eta_str = format_eta(eta)
-        else:
-            eta_str = "--:--:--"
-
-        elapsed_str = format_eta(elapsed)
-        sys.stdout.write(
-            f"\r진행률: [{bar}] {percent:5.1f}%  "
-            f"({completed}/{total})  "
-            f"경과: {elapsed_str}  남은시간: {eta_str}   "
-        )
-        sys.stdout.flush()
-
-    start_time = time.time()
-    # 시작 즉시 0% 상태 출력
-    print_progress(0, total_subtasks, start_time)
-
-    completed_subtasks = 0
-    while completed_subtasks < total_subtasks:
-        q.get()
-        completed_subtasks += 1
-        print_progress(completed_subtasks, total_subtasks, start_time)
-
-    pool.join()
-    total_elapsed = format_eta(time.time() - start_time)
-    print(f"\n\n모든 작업이 완료되었습니다. (총 소요시간: {total_elapsed})")
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--processes', type=int, default=5)
+    raise SystemExit(main(parser.parse_args().processes))

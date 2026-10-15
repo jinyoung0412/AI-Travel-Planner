@@ -8,24 +8,27 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sqlite3
 import sys
 from pathlib import Path
 
 import pandas as pd
+from dotenv import load_dotenv
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 from blog_evidence import verify_post
 from Preprocess.RunPreprocess.build_database import read_database
-from Preprocess.RunPreprocess.collect_blog_tags import collect_with_audit
+from Preprocess.RunPreprocess.collect_blog_tags import collect_with_audit, CollectionInterrupted, canonical_blog_url
+from Preprocess.crawler.storage import atomic_output
 
 MANIFEST = ROOT / 'Preprocess/pilots/homonym_5.json'
 OUTPUT = ROOT / 'local_artifacts/homonym_5'
 DB = ROOT / 'Flask_server/places.db'
 IDENTITY_FIELDS = ('place_id', 'identity_key', '가게명', '주소', 'latitude', 'longitude')
 GENERIC = {'후기', '일상', '충남', '충청남도', '천안', '아산', '내돈내산'}
-ENGAGEMENT = ('서이추', '서로이웃', '이웃추가', '블챌', '블로그챌린지', '체험단', '협찬')
+ENGAGEMENT = ('서이추', '서로이웃', '이웃추가', '블챌', '블로그챌린지', '체험단', '협찬', '행사', '이벤트', '공지', '기자단', '원고료', '광고')
 
 
 def digest(path):
@@ -33,7 +36,8 @@ def digest(path):
 
 
 def save_json(path, data):
-    Path(path).write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8')
+    with atomic_output(path) as stream:
+        json.dump(data, stream, ensure_ascii=False, indent=2)
 
 
 def checked_targets(manifest_path, db):
@@ -79,37 +83,94 @@ def prepare(manifest_path=MANIFEST, db=DB, output=OUTPUT):
     return report
 
 
-def collect(manifest_path=MANIFEST, db=DB, output=OUTPUT):
+def collect(manifest_path=MANIFEST, db=DB, output=OUTPUT, resume=False):
     manifest, targets = checked_targets(manifest_path, db)
     if manifest.get('collection_authorized_now') is not True:
         raise ValueError('이번 실행은 수집 준비만 허용됐습니다. 실제 수집은 비활성 상태입니다.')
+    load_dotenv(ROOT / '.env')
     if not all(os.getenv(k) for k in ('NAVER_API_ID', 'NAVER_API_SECRET')):
         raise ValueError('NAVER_API_ID / NAVER_API_SECRET 누락: 외부 요청 0회.')
     output = Path(output)
+    existing = (output / 'collection.json').exists() or any(output.glob('collection-*.json'))
+    if existing and not resume:
+        raise ValueError('기존 수집 기록이 있습니다. 재개는 --resume으로 명시하세요.')
     output.mkdir(parents=True, exist_ok=True)
-    # Preserve earlier collection and human work instead of silently overwriting.
-    if (output / 'collection.json').exists() or any(output.glob('collection-*.json')):
-        raise ValueError('기존 수집 기록이 있습니다. 새 출력 디렉터리를 사용하세요.')
     review_path = output / 'review.json'
-    if review_path.exists() and json.loads(review_path.read_text())['entries']:
+    review = json.loads(review_path.read_text(encoding='utf-8')) if review_path.exists() else {
+        'pilot_id': manifest['pilot_id'], 'entries': []}
+    if review.get('pilot_id') != manifest['pilot_id']:
+        raise ValueError('기존 검토의 pilot_id가 다릅니다.')
+    if review['entries'] and not resume:
         raise ValueError('기존 수동 검토를 덮어쓸 수 없습니다.')
-    runs, entries = [], []
-    for index, place in enumerate(targets):
-        run = {'place_id': place['place_id'], **collect_with_audit(place, max_posts=30)}
-        runs.append(run)
-        save_json(output / f'collection-{index + 1}.json', run)
-        # Include rejected posts too: reviewers can report potential false negatives.
-        for post in run['audit']['posts']:
-            entries.append({'place_id': place['place_id'], 'url': post['url'],
-                            'automatic_outcome': post['outcome'], 'identity_match': None,
-                            'approved_taste_tags': [], 'notes': ''})
+    runs = []
+    if existing:
+        summary_path = output / 'collection.json'
+        summary = json.loads(summary_path.read_text(encoding='utf-8')) if summary_path.exists() else {
+            'pilot_id': manifest['pilot_id'], 'runs': []}
+        if summary.get('pilot_id') != manifest['pilot_id']:
+            raise ValueError('기존 수집의 pilot_id가 다릅니다.')
+        runs = summary['runs']
+        # A crash between the per-place checkpoint and summary must not recollect that place.
+        for index, place in enumerate(targets):
+            checkpoint = output / f'collection-{index + 1}.json'
+            if checkpoint.exists():
+                run = json.loads(checkpoint.read_text(encoding='utf-8'))
+                if len(runs) <= index:
+                    runs.append(run)
+                else:
+                    runs[index] = run
+        if len(runs) > len(targets) or any(run['place_id'] != targets[i]['place_id'] for i, run in enumerate(runs)):
+            raise ValueError('기존 수집 순서 또는 고정 ID 불일치')
+    entries = review['entries']
+
+    def checkpoint():
         save_json(output / 'collection.json', {'pilot_id': manifest['pilot_id'], 'runs': runs,
-                  'remaining_targets': [p['place_id'] for p in targets[index + 1:]]})
-        save_json(review_path, {'pilot_id': manifest['pilot_id'], 'entries': entries})
+                  'retryable_targets': [run['place_id'] for run in runs if run['audit'].get('search_error')],
+                  'remaining_targets': [place['place_id'] for i, place in enumerate(targets)
+                                        if i >= len(runs) or runs[i]['audit'].get('status') == 'interrupted' ]})
+        known = {(entry['place_id'], entry['url']) for entry in entries}
+        for run in runs:
+            for post in run['audit']['posts']:
+                key = (run['place_id'], post['url'])
+                if key not in known:
+                    entries.append({'place_id': run['place_id'], 'url': post['url'],
+                                    'automatic_outcome': post['outcome'], 'identity_match': None,
+                                    'approved_taste_tags': [], 'notes': ''})
+                    known.add(key)
+        save_json(review_path, {**review, 'entries': entries})
+
+    checkpoint()
+    for index, place in enumerate(targets):
+        previous = runs[index]['audit'] if index < len(runs) else None
+        if previous is not None and previous.get('status') != 'interrupted' and not previous.get('search_error'):
+            continue
+        interrupted = None
+        try:
+            result = collect_with_audit(place, max_posts=30, previous=previous)
+        except CollectionInterrupted as exc:
+            result, interrupted = exc.result, exc
+        run = {'place_id': place['place_id'], **result}
+        if index < len(runs):
+            runs[index] = run
+        else:
+            runs.append(run)
+        save_json(output / f'collection-{index + 1}.json', run)
+        checkpoint()
+        if interrupted is not None:
+            raise interrupted
         if run['audit'].get('search_error', {}).get('http_status') in (401, 403):
             break
     return {'collected_places': len(runs), 'api_requests': sum(
-        len(r['audit']['request_trace']) for r in runs), 'db_applied': False}
+        len(run['audit']['request_trace']) for run in runs), 'db_applied': False}
+
+
+def is_taste_tag(tag, place):
+    cleaned = re.sub(r'[\s#]+', '', tag).casefold()
+    regions = set(GENERIC)
+    for token in str(place.get('주소', '')).split():
+        if token.endswith(('시', '군', '구', '읍', '면', '동')):
+            regions.update((token, token[:-1]))
+    return bool(cleaned and cleaned not in regions and not cleaned.startswith(ENGAGEMENT))
 
 
 def export_reviewed(manifest_path=MANIFEST, db=DB, output=OUTPUT):
@@ -136,9 +197,10 @@ def export_reviewed(manifest_path=MANIFEST, db=DB, output=OUTPUT):
         seen.add(pid)
         kept, urls = [], set()
         for post in run['audit']['posts']:
-            if post['url'] in urls or len(urls) >= 30:
+            canonical = canonical_blog_url(post['url'])
+            if not canonical or canonical in urls or len(urls) >= 30:
                 raise ValueError('수집 글 URL 중복 또는 최대 개수 초과입니다.')
-            urls.add(post['url'])
+            urls.add(canonical)
             entry = reviews.get((pid, post['url']))
             if post['outcome'] != 'identity_accepted':
                 potential_misses += bool(entry and entry.get('identity_match') is True)
@@ -152,16 +214,19 @@ def export_reviewed(manifest_path=MANIFEST, db=DB, output=OUTPUT):
                 raise ValueError('허용 글의 신원 근거가 현재 규칙에 맞지 않습니다.')
             approved = entry.get('approved_taste_tags')
             if (not isinstance(approved, list) or any(not isinstance(t, str) or
-                    t not in post.get('tags', []) or t in GENERIC or t.startswith(ENGAGEMENT) for t in approved)):
-                raise ValueError('취향 태그는 추출된 태그의 부분집합이어야 하며 지역·교류 태그는 제외합니다.')
+                    t not in post.get('tags', []) or not is_taste_tag(t, target_map[pid]) for t in approved)):
+                raise ValueError('취향 태그는 추출된 태그의 부분집합이어야 하며 지역·교류·행사 태그는 제외합니다.')
             confirmed += 1
             if approved:
                 kept.append({**post, 'tags': sorted(set(approved))})
         if kept:
             rows.append({'place_id': pid, 'blog_tag_status': 'verified',
                          'verified_posts': json.dumps(kept, ensure_ascii=False)})
-    pd.DataFrame(rows, columns=['place_id', 'blog_tag_status', 'verified_posts']).to_csv(
-        output / 'reviewed_tags.csv', index=False, encoding='utf-8-sig')
+    collected_keys = {(run['place_id'], post['url']) for run in collection['runs'] for post in run['audit']['posts']}
+    if set(reviews) - collected_keys:
+        raise ValueError('수집 기록 밖의 수동 검토 항목입니다.')
+    with atomic_output(output / 'reviewed_tags.csv', encoding='utf-8-sig') as stream:
+        pd.DataFrame(rows, columns=['place_id', 'blog_tag_status', 'verified_posts']).to_csv(stream, index=False)
     metrics = {'identity_precision': confirmed / denominator if denominator else None,
                'precision_denominator': denominator, 'identity_confirmed': confirmed,
                'places_with_reviewed_taste': len(rows), 'potential_false_negatives': potential_misses,
@@ -173,9 +238,11 @@ def export_reviewed(manifest_path=MANIFEST, db=DB, output=OUTPUT):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action', choices=['prepare', 'collect', 'export-reviewed'], nargs='?', default='prepare')
+    parser.add_argument('--resume', action='store_true', help='기존 수집·수동 검토를 보존하며 미완료 장소만 재개')
     parser.add_argument('--manifest', type=Path, default=MANIFEST)
     parser.add_argument('--db', type=Path, default=DB)
     parser.add_argument('--output-dir', type=Path, default=OUTPUT)
     args = parser.parse_args()
     action = {'prepare': prepare, 'collect': collect, 'export-reviewed': export_reviewed}[args.action]
-    print(json.dumps(action(args.manifest, args.db, args.output_dir), ensure_ascii=False, indent=2))
+    kwargs = {'resume': args.resume} if args.action == 'collect' else {}
+    print(json.dumps(action(args.manifest, args.db, args.output_dir, **kwargs), ensure_ascii=False, indent=2))
