@@ -15,7 +15,7 @@ from api_request import (CategoryRequired, json_object, user_text, parse_recomme
 
 from recommendation_ai import (add_scores, greedy_tsp, search_courses, fixed_categories,
                                SLOT_CATEGORY_MAP, FOOD_CATS, RADIUS_KM, route_metrics, distances_from)
-from place_identity import quarantine_legacy
+from place_identity import quarantine_legacy, local_aliases, alias_conflicts
 
 load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
 
@@ -178,6 +178,8 @@ def _fmt(record: dict) -> dict:
     return {
         'place_id': record['place_id'],
         'identity_key': record['identity_key'],
+        'identity_aliases': sorted(local_aliases(record)),
+        'identity_alias_conflicts': {alias: sorted(owners) for alias, owners in alias_conflicts(record).items()},
         'name':     record['가게명'],
         'lat':      record['latitude'],
         'lng':      record['longitude'],

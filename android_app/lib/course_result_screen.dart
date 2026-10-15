@@ -3,6 +3,7 @@ import 'bookmark_button.dart';
 import 'course_timeline.dart';
 import 'local_storage_service.dart';
 import 'travel_data.dart';
+import 'preference_notice.dart';
 
 class CourseResultScreen extends StatefulWidget {
   final List<List<dynamic>> courses;
@@ -146,6 +147,7 @@ class _CourseResultScreenState extends State<CourseResultScreen> {
                         ),
                       ),
                     ),
+                    PreferenceNotice(metadata: widget.metadata),
                     CourseTimeline(places: _spots(index)),
                   ],
                 ),

@@ -63,5 +63,35 @@
     "label": "road_name_suffix",
     "address": "충남 천안시 중앙로10번길 10",
     "matches": false
+  },
+  {
+    "label": "decimal_number",
+    "address": "천안시 중앙로 10.5",
+    "matches": false
+  },
+  {
+    "label": "slash_number",
+    "address": "천안시 중앙로 10/2",
+    "matches": false
+  },
+  {
+    "label": "fullwidth_hyphen",
+    "address": "천안시 중앙로 10－2",
+    "matches": false
+  },
+  {
+    "label": "unicode_minus",
+    "address": "천안시 중앙로 10−2",
+    "matches": false
+  },
+  {
+    "label": "fullwidth_slash",
+    "address": "천안시 중앙로 10／2",
+    "matches": false
+  },
+  {
+    "label": "invalid_subnumber",
+    "address": "천안시 중앙로 10 - x",
+    "matches": false
   }
 ]

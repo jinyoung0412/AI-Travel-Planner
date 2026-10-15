@@ -299,8 +299,11 @@ class _InputScreenState extends State<InputScreen> {
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (_) =>
-                SpotResultScreen(places: places, requestedCount: _resultCount),
+            builder: (_) => SpotResultScreen(
+              places: places,
+              requestedCount: _resultCount,
+              metadata: data.metadata,
+            ),
           ),
         );
       } else {

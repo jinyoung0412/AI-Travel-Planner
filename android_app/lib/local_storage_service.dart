@@ -83,23 +83,65 @@ class LocalStorageService {
     return result;
   }
 
+  static final _localId = RegExp(r'^local:v1:[0-9a-f]{64}$');
+
+  static Object? _optionalJson(Object? value) {
+    if (value is! String) return value;
+    try {
+      return jsonDecode(value);
+    } on FormatException {
+      return null;
+    }
+  }
+
+  static Set<String> _aliases(Map<String, dynamic> spot) {
+    final stored = _optionalJson(spot['identity_aliases']);
+    return [
+      if (stored is List) ...stored,
+      spot['place_id'],
+      spot['identity_key'],
+    ].whereType<String>().where(_localId.hasMatch).toSet();
+  }
+
+  static Map<String, Set<String>> _conflicts(Map<String, dynamic> spot) {
+    final stored = _optionalJson(spot['identity_alias_conflicts']);
+    if (stored is! Map) return {};
+    final result = <String, Set<String>>{};
+    for (final entry in stored.entries) {
+      if (entry.key is! String ||
+          !_localId.hasMatch(entry.key) ||
+          entry.value is! List) {
+        continue;
+      }
+      final owners = (entry.value as List)
+          .whereType<String>()
+          .where((id) => id.contains(':') && !id.startsWith('local:v1:'))
+          .toSet();
+      if (owners.length > 1) result[entry.key as String] = owners;
+    }
+    return result;
+  }
+
   static bool samePlace(Map<String, dynamic> a, Map<String, dynamic> b) {
     a = identify(a);
     b = identify(b);
     if (a['place_id'] == b['place_id']) return true;
+    // Two provider identities remain distinct even if a legacy origin marker
+    // or an old alias survived a previous client migration.
+    if (_authoritative(a) && _authoritative(b)) return false;
+    final blocked = {..._conflicts(a).keys, ..._conflicts(b).keys};
     final aLocal = '${a['place_id']}'.startsWith('local:v1:');
     final bLocal = '${b['place_id']}'.startsWith('local:v1:');
-    if ((aLocal || bLocal) &&
-        a['identity_key'] != null &&
-        a['identity_key'] == b['identity_key']) {
-      return true;
+    if (aLocal || bLocal) {
+      final shared = _aliases(a).intersection(_aliases(b))..removeAll(blocked);
+      if (shared.isNotEmpty) return true;
     }
-    // Old courses omitted addresses; name + exact six-decimal coordinates is
-    // permitted only when at least one side came from that legacy format.
+    // Addressless old courses use exact six-decimal coordinates, unless that
+    // same alias is known to have belonged to multiple provider identities.
     if (a['identity_origin'] == 'legacy_coordinates' ||
         b['identity_origin'] == 'legacy_coordinates') {
       final key = _coordinateKey(a);
-      return key != null && key == _coordinateKey(b);
+      return key != null && !blocked.contains(key) && key == _coordinateKey(b);
     }
     return false;
   }
@@ -172,13 +214,27 @@ class LocalStorageService {
   ) {
     final updated = identify(incoming);
     // A stale legacy screen must not downgrade an already upgraded provider ID.
-    if (_authoritative(existing) && !_authoritative(updated)) {
-      return {...updated, ...existing};
+    final result = _authoritative(existing) && !_authoritative(updated)
+        ? <String, dynamic>{...updated, ...existing}
+        : <String, dynamic>{
+            ...existing,
+            ...updated,
+            'identity_origin': updated['identity_origin'] ?? 'server',
+          };
+    final conflicts = _conflicts(existing);
+    for (final entry in _conflicts(updated).entries) {
+      conflicts.putIfAbsent(entry.key, () => <String>{}).addAll(entry.value);
     }
     return {
-      ...existing,
-      ...updated,
-      'identity_origin': updated['identity_origin'] ?? 'server',
+      ...result,
+      'identity_aliases': ({
+        ..._aliases(existing),
+        ..._aliases(updated),
+      }.toList()..sort()),
+      'identity_alias_conflicts': {
+        for (final entry in conflicts.entries)
+          entry.key: (entry.value.toList()..sort()),
+      },
     };
   }
 

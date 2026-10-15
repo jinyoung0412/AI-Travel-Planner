@@ -14,7 +14,7 @@ function addressAnchor(value) {
         const start = city.index + city[0].length;
         const end = Math.min(start + 250, cities[i + 1]?.index ?? text.length);
         const road = text.slice(start).match(
-            /(?<![가-힣a-z0-9_·])([가-힣a-z0-9·]+(?:로|길))\s*(\d+(?:\s*-\s*\d+)?)(?![가-힣a-z0-9_-]|\s*-)/
+            /(?<![가-힣a-z0-9_·])([가-힣a-z0-9·]+(?:로|길))\s*(\d+(?:\s*-\s*\d+)?)(?![가-힣a-z0-9_-]|\s*[-－–—−/／]|\.\d)/
         );
         if (road && start + road.index + road[0].length <= end) return `${city[1]}|${road[1]}|${road[2].replace(/\s+/g, '')}`;
     }
