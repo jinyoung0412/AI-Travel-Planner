@@ -23,7 +23,10 @@ function addressAnchor(value) {
 
 function distanceM(lat, lng, doc) {
     const y = Number(doc.y), x = Number(doc.x);
-    if (!Number.isFinite(y) || !Number.isFinite(x)) return Infinity;
+    const coordinate = value => (typeof value === 'number' ||
+        (typeof value === 'string' && value.trim().length > 0));
+    if (!coordinate(doc.y) || !coordinate(doc.x) || !Number.isFinite(y) || !Number.isFinite(x) ||
+        Math.abs(y) > 90 || Math.abs(x) > 180) return Infinity;
     const radians = degrees => degrees * Math.PI / 180;
     const h = Math.sin(radians(y - lat) / 2) ** 2
         + Math.cos(radians(lat)) * Math.cos(radians(y)) * Math.sin(radians(x - lng) / 2) ** 2;
@@ -35,8 +38,9 @@ function selectIdentityMatch(documents, { name, address, lat, lng }) {
     // An incomplete provided address cannot prove a different provider's ID.
     if (address && !expected) return null;
     const query = normalize(name);
+    if (!Array.isArray(documents)) throw new Error('Invalid map response');
     const matches = documents.filter(doc => {
-        if (!doc.place_url || distanceM(lat, lng, doc) > 250) return false;
+        if (!doc || typeof doc !== 'object' || !/^https?:\/\/place\.map\.kakao\.com\/\d+$/.test(doc.place_url) || distanceM(lat, lng, doc) > 250) return false;
         const actualName = normalize(doc.place_name);
         if (actualName !== query && !(expected && actualName.startsWith(query + ' '))) return false;
         return !expected || [doc.road_address_name, doc.address_name].some(a => addressAnchor(a) === expected);
@@ -50,7 +54,8 @@ async function findPlace(httpClient, input, headers) {
         params: { query: input.name, x: input.lng, y: input.lat, radius: 1000, size: 15 }, headers,
         timeout: 10000,
     });
-    return selectIdentityMatch(response.data.documents || [], input);
+    const match = selectIdentityMatch(response.data?.documents, input);
+    return match ? { ...match, place_url: match.place_url.replace(/^http:/, 'https:') } : null;
 }
 
 module.exports = { selectIdentityMatch, findPlace };

@@ -39,3 +39,20 @@ for (const fixture of addressCases) {
         assert.equal(selectIdentityMatch([actual], expected)?.id ?? null, fixture.matches ? '1' : null);
     });
 }
+
+
+test('numeric coordinates and provider HTTP links remain compatible; links upgrade to HTTPS', async () => {
+    const actual = { ...doc, x: 127.1139, y: 36.8151, place_url: 'http://place.map.kakao.com/1' };
+    assert.equal(selectIdentityMatch([actual], input).id, '1');
+    const matched = await findPlace({ get: async () => ({ data: { documents: [actual] } }) }, input, {});
+    assert.equal(matched.place_url, 'https://place.map.kakao.com/1');
+});
+
+test('malformed map documents and unrelated URLs cannot prove an identity', () => {
+    assert.throws(() => selectIdentityMatch({}, input), /Invalid map response/);
+    for (const invalid of [null, { ...doc, x: null }, { ...doc, y: '' },
+        { ...doc, x: 181 }, { ...doc, place_url: 'https://other.invalid/1' },
+        { ...doc, place_url: 'javascript:alert(1)' }]) {
+        assert.equal(selectIdentityMatch([invalid], input), null);
+    }
+});
