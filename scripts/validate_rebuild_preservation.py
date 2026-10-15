@@ -5,6 +5,7 @@ import json
 import sqlite3
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 import pandas as pd
@@ -49,6 +50,7 @@ def main():
     parser.add_argument('--output', type=Path, default=ROOT / 'local_artifacts/review_fix_validation.json')
     args = parser.parse_args()
     requests.sessions.Session.request = forbidden
+    started = time.perf_counter()
     source_hash = digest(args.source_db)
     original = read_database(args.source_db)
     original_ids = set(original['place_id'])
@@ -57,26 +59,33 @@ def main():
     first, second = candidates[:2]
     report = {'offline': True, 'mock_evidence_only': True, 'source_places': len(original),
               'source_unique_ids': len(original_ids), 'source_sha256_before': source_hash,
-              'source_quarantine_rows': original_quarantine[0], 'cycles': []}
+              'source_quarantine_rows': original_quarantine[0],
+              'source_verified_places': int(original['blog_tag_status'].eq('verified').sum()), 'cycles': []}
     with tempfile.TemporaryDirectory(prefix='travel-review-preservation-') as temporary:
         temp = Path(temporary)
         db = temp / 'places.db'
         with sqlite3.connect(args.source_db.resolve().as_uri() + '?mode=ro', uri=True) as source, sqlite3.connect(db) as target:
             source.backup(target)
         # Simulate one already completed place and a different partial collection.
+        seed_started = time.perf_counter()
         seeded, _ = merge_verified_tags(original, pd.DataFrame([tag_record(first, 'existing')]))
+        report['seed_merge_seconds'] = round(time.perf_counter() - seed_started, 3)
         write_database(seeded, db, preserve=True)
         partial_tags = temp / 'partial_tags.csv'
         pd.DataFrame([tag_record(second, 'new')]).to_csv(partial_tags, index=False)
         prior_snapshot = None
         for cycle in range(3):
+            migration_started = time.perf_counter()
             migration = migrate(db, temp / 'export', apply=True)
+            migration_seconds = time.perf_counter() - migration_started
             catalog = temp / 'export/places_catalog.csv'
             queue = temp / 'export/recollect_places.csv'
             catalog_frame = pd.read_csv(catalog)
             assert len(catalog_frame) == len(original)
             # Cycle 0 deliberately repeats the old README's subset mistake.
+            build_started = time.perf_counter()
             stats = build(queue if cycle == 0 else catalog, partial_tags, db)
+            build_seconds = time.perf_counter() - build_started
             actual = read_database(db).sort_values('place_id').reset_index(drop=True)
             assert set(actual['place_id']) == original_ids
             assert actual['blog_tag_status'].eq('verified').sum() == 2
@@ -94,12 +103,14 @@ def main():
                 'queue_places': len(pd.read_csv(queue)), 'input_mode': 'queue' if cycle == 0 else 'full_catalog',
                 'places': len(actual), 'unique_ids': actual['place_id'].nunique(),
                 'verified_places': int(actual['blog_tag_status'].eq('verified').sum()),
-                'quarantine_rows': original_quarantine[0], 'backups_verified': 2,
+                'quarantine_rows': original_quarantine[0], 'backups_verified': 2, 'migration_seconds': round(migration_seconds, 3),
+                'build_seconds': round(build_seconds, 3),
                 'identical_to_previous_cycle': cycle > 0})
         with sqlite3.connect(db.resolve().as_uri() + '?mode=ro', uri=True) as conn:
             report['temp_db_integrity'] = conn.execute('pragma integrity_check').fetchone()[0]
     report.update(source_sha256_after=digest(args.source_db), temporary_artifacts_removed=True,
-                  quarantine_preserved=True, all_ids_preserved=True, no_external_calls=True)
+                  quarantine_preserved=True, all_ids_preserved=True, no_external_calls=True,
+                  elapsed_seconds=round(time.perf_counter() - started, 3))
     assert report['source_sha256_after'] == source_hash
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2))
