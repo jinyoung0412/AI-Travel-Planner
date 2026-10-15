@@ -1,6 +1,5 @@
-"""Deterministic offline smoke check; no missing dummy CSV or external APIs."""
+"""Standalone synthetic diagnostic; comprehensive regressions live in tests/."""
 import pandas as pd
-from app import filter_keywords
 from recommendation_ai import generate_from_slots, route_metrics
 
 
@@ -11,7 +10,11 @@ def run_recommendation_algorithm():
                         '방문자수': 0, '블로그수': 0, 'blog_tags': '{}', 'Cluster': i % 2}
                        for i in range(60)])
     origin = (36.8151, 127.1139)
-    courses = generate_from_slots(df, ['음식', '자연·산책', '카페'], [], filter_keywords,
+
+    def synthetic_filter(frame, categories, tags):
+        return frame[frame['카테고리'].isin(categories)]
+
+    courses = generate_from_slots(df, ['음식', '자연·산책', '카페'], [], synthetic_filter,
                                   n=5, start=origin, seed=42)
     assert len(courses) == 5
     for c in courses:
