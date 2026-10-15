@@ -1,10 +1,36 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'travel_data.dart';
 
 class LocalStorageService {
   static const _spotsKey = 'saved_spots';
   static const _coursesKey = 'saved_courses';
+
+  static Future<void>? _pending;
+  static int _unresolvedSequence = 0;
+
+  // SharedPreferences has no atomic read-modify-write operation. Queue reads too,
+  // since first reads migrate legacy data. The queue is scoped to this isolate.
+  static Future<T> _serial<T>(Future<T> Function() operation) {
+    final previous = _pending;
+    final released = Completer<void>();
+    _pending = released.future;
+    return () async {
+      try {
+        if (previous != null) await previous;
+        return await operation();
+      } finally {
+        if (identical(_pending, released.future)) _pending = null;
+        released.complete();
+      }
+    }();
+  }
+
+  static Future<void> _stored(Future<bool> result) async {
+    if (!await result) throw StateError('저장소에 기록하지 못했습니다.');
+  }
 
   // Mirrors place_identity.py v1; no fuzzy name matching.
   static String _normalize(dynamic value) => (value ?? '')
@@ -43,11 +69,11 @@ class LocalStorageService {
         ? _hash(_normalize(spot['name']), address)
         : _coordinateKey(spot);
     result['identity_key'] = spot['identity_key'] ?? alias;
-    if (spot['place_id'] == null || '${spot['place_id']}'.isEmpty) {
+    if (spot['place_id'] == null || '${spot['place_id']}'.trim().isEmpty) {
       result['place_id'] =
           alias ??
           unresolvedId ??
-          'legacy:unresolved:${DateTime.now().microsecondsSinceEpoch}';
+          'legacy:unresolved:${DateTime.now().microsecondsSinceEpoch}:${_unresolvedSequence++}';
       result['identity_origin'] = address.isNotEmpty
           ? 'legacy_address'
           : alias != null
@@ -85,7 +111,7 @@ class LocalStorageService {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(key);
     if (raw == null) return [];
-    final data = List<Map<String, dynamic>>.from(jsonDecode(raw));
+    final data = jsonObjects(jsonDecode(raw));
     final migrated = data.asMap().entries.map((entry) {
       if (!courses) {
         return identify(
@@ -93,7 +119,7 @@ class LocalStorageService {
           unresolvedId: 'legacy:unresolved:$key:${entry.key}',
         );
       }
-      final spots = List<Map<String, dynamic>>.from(entry.value['spots'] ?? []);
+      final spots = jsonObjects(entry.value['spots'] ?? []);
       return <String, dynamic>{
         ...entry.value,
         'spots': spots
@@ -110,35 +136,57 @@ class LocalStorageService {
     }).toList();
     if (prefs.getInt('${key}_schema') != 2) {
       if (!prefs.containsKey('${key}_legacy_backup')) {
-        await prefs.setString('${key}_legacy_backup', raw);
+        await _stored(prefs.setString('${key}_legacy_backup', raw));
       }
-      await prefs.setString(key, jsonEncode(migrated));
-      await prefs.setInt('${key}_schema', 2);
+      await _stored(prefs.setString(key, jsonEncode(migrated)));
+      await _stored(prefs.setInt('${key}_schema', 2));
     }
     return migrated;
   }
 
   static Future<List<Map<String, dynamic>>> getSavedSpots() =>
-      _read(_spotsKey, courses: false);
+      _serial(() => _read(_spotsKey, courses: false));
   static Future<void> _write(
     String key,
     List<Map<String, dynamic>> items,
   ) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(key, jsonEncode(items));
+    await _stored(prefs.setString(key, jsonEncode(items)));
   }
 
-  static Future<void> saveSpot(Map<String, dynamic> spot) async {
-    final spots = await getSavedSpots();
+  static Future<void> saveSpot(Map<String, dynamic> spot) {
+    final snapshot = Map<String, dynamic>.from(spot);
+    return _serial(() => _saveSpot(snapshot));
+  }
+
+  static bool _authoritative(Map<String, dynamic> spot) {
+    final id = '${spot['place_id'] ?? ''}';
+    return id.isNotEmpty &&
+        !id.startsWith('local:v1:') &&
+        !id.startsWith('legacy:');
+  }
+
+  static Map<String, dynamic> _mergeSpot(
+    Map<String, dynamic> existing,
+    Map<String, dynamic> incoming,
+  ) {
+    final updated = identify(incoming);
+    // A stale legacy screen must not downgrade an already upgraded provider ID.
+    if (_authoritative(existing) && !_authoritative(updated)) {
+      return {...updated, ...existing};
+    }
+    return {
+      ...existing,
+      ...updated,
+      'identity_origin': updated['identity_origin'] ?? 'server',
+    };
+  }
+
+  static Future<void> _saveSpot(Map<String, dynamic> spot) async {
+    final spots = await _read(_spotsKey, courses: false);
     final index = spots.indexWhere((s) => samePlace(s, spot));
     if (index >= 0) {
-      // Upgrade a matched legacy coordinate record to the authoritative ID.
-      final updated = identify(spot);
-      spots[index] = {
-        ...spots[index],
-        ...updated,
-        'identity_origin': updated['identity_origin'] ?? 'server',
-      };
+      spots[index] = _mergeSpot(spots[index], spot);
       await _write(_spotsKey, spots);
       return;
     }
@@ -151,16 +199,17 @@ class LocalStorageService {
 
   static Future<bool> isSpotSaved(Map<String, dynamic> spot) async =>
       (await getSavedSpots()).any((s) => samePlace(s, spot));
-  static Future<void> deleteSpot(Map<String, dynamic> spot) async {
-    final spots = await getSavedSpots();
-    spots.removeWhere((s) => samePlace(s, spot));
-    await _write(_spotsKey, spots);
-  }
+  static Future<void> deleteSpot(Map<String, dynamic> spot) =>
+      _serial(() async {
+        final spots = await _read(_spotsKey, courses: false);
+        spots.removeWhere((s) => samePlace(s, spot));
+        await _write(_spotsKey, spots);
+      });
 
   static Future<List<Map<String, dynamic>>> getSavedCourses() =>
-      _read(_coursesKey, courses: true);
+      _serial(() => _read(_coursesKey, courses: true));
   static List<Map<String, dynamic>> _spots(Map<String, dynamic> course) =>
-      List<Map<String, dynamic>>.from(course['spots'] ?? []);
+      jsonObjects(course['spots'] ?? []);
   static bool _sameCourse(
     List<Map<String, dynamic>> a,
     List<Map<String, dynamic>> b,
@@ -169,33 +218,60 @@ class LocalStorageService {
       List.generate(a.length, (i) => samePlace(a[i], b[i])).every((v) => v);
   static Future<void> saveCourse(
     String region,
-    List<Map<String, dynamic>> spots,
-  ) async {
-    final courses = await getSavedCourses();
-    courses.removeWhere((c) => _sameCourse(_spots(c), spots));
-    courses.insert(0, {
-      'region': region,
-      'spots': spots.map(identify).toList(),
-      'created_at': DateTime.now().toIso8601String(),
+    List<Map<String, dynamic>> spots, {
+    Map<String, dynamic>? metric,
+    Map<String, dynamic>? metadata,
+  }) {
+    final snapshot = spots.map((s) => Map<String, dynamic>.from(s)).toList();
+    final savedMetric = metric == null
+        ? null
+        : Map<String, dynamic>.from(metric);
+    final savedMetadata = metadata == null
+        ? null
+        : Map<String, dynamic>.from(metadata);
+    return _serial(() async {
+      final spots = snapshot;
+      final courses = await _read(_coursesKey, courses: true);
+      final index = courses.indexWhere((c) => _sameCourse(_spots(c), spots));
+      final existing = index >= 0 ? courses[index] : <String, dynamic>{};
+      final existingSpots = index >= 0
+          ? _spots(existing)
+          : <Map<String, dynamic>>[];
+      final mergedSpots = List.generate(
+        spots.length,
+        (i) => index >= 0
+            ? _mergeSpot(existingSpots[i], spots[i])
+            : identify(spots[i]),
+      );
+      courses.removeWhere((c) => _sameCourse(_spots(c), spots));
+      courses.insert(0, {
+        ...existing,
+        'region': region,
+        if (savedMetric != null) 'metric': savedMetric,
+        if (savedMetadata != null) 'metadata': savedMetadata,
+        'spots': mergedSpots,
+        'created_at': DateTime.now().toIso8601String(),
+      });
+      if (courses.length > 100) courses.removeRange(100, courses.length);
+      await _write(_coursesKey, courses);
     });
-    if (courses.length > 100) courses.removeRange(100, courses.length);
-    await _write(_coursesKey, courses);
   }
 
   static Future<bool> isCourseSaved(List<Map<String, dynamic>> spots) async =>
       (await getSavedCourses()).any((c) => _sameCourse(_spots(c), spots));
-  static Future<void> removeCourseBySpots(
-    List<Map<String, dynamic>> spots,
-  ) async {
-    final courses = await getSavedCourses();
-    courses.removeWhere((c) => _sameCourse(_spots(c), spots));
-    await _write(_coursesKey, courses);
+  static Future<void> removeCourseBySpots(List<Map<String, dynamic>> spots) {
+    final snapshot = spots.map((s) => Map<String, dynamic>.from(s)).toList();
+    return _serial(() async {
+      final courses = await _read(_coursesKey, courses: true);
+      courses.removeWhere((c) => _sameCourse(_spots(c), snapshot));
+      await _write(_coursesKey, courses);
+    });
   }
 
-  static Future<void> deleteCourse(int index) async {
-    final courses = await getSavedCourses();
+  static Future<void> deleteCourse(int index) => _serial(() async {
+    final courses = await _read(_coursesKey, courses: true);
     if (index < 0 || index >= courses.length) return;
     courses.removeAt(index);
     await _write(_coursesKey, courses);
-  }
+  });
 }
