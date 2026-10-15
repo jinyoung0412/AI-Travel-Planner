@@ -232,3 +232,89 @@ def test_synthetic_html_captures_short_proof_not_full_article(places, selector):
     assert post['tag_parser'] == 'gsTagName' and post['tags'] == ['조용한', '서이추']
     assert 'PRIVATE ARTICLE' not in json.dumps(post)
     assert collector.parse_post_html('<html>no body</html>', post['url'], place, '') is None
+
+
+def test_supported_identity_without_tag_payload_remains_retryable(monkeypatch, places):
+    place = ensure_ids(places.head(1)).iloc[0].to_dict()
+    monkeypatch.setattr(collector, 'search_blog_urls', lambda *a, **kw: (['https://blog.naver.com/test/1'], 'query'))
+    monkeypatch.setattr(collector, 'fetch_post', lambda url, *a, **kw: {
+        'url': url, 'name_excerpt': place['가게명'], 'address_excerpt': place['주소'],
+        'tags': [], 'tag_parser': 'no_supported_tag_payload'})
+    result = collector.collect_with_audit(place, delay=0)
+    assert result['audit']['identity_accepted'] == 1
+    assert result['record']['blog_tag_status'] == 'parse_unavailable'
+
+
+def test_interrupt_checkpoints_and_resume_does_not_repeat_completed_posts(prepared, monkeypatch):
+    path, db, output, manifest = prepared
+    manifest['collection_authorized_now'] = True
+    pilot.save_json(path, manifest)
+    monkeypatch.setenv('NAVER_API_ID', 'synthetic')
+    monkeypatch.setenv('NAVER_API_SECRET', 'synthetic')
+    monkeypatch.setattr(collector.time, 'sleep', lambda _: None)
+    calls = []
+    def search(place, **kwargs):
+        calls.append(('search', place['place_id']))
+        return ['https://blog.naver.com/synthetic/1', 'https://blog.naver.com/synthetic/2'], 'query'
+    def fetch(url, place, query, **kwargs):
+        calls.append(('fetch', place['place_id'], url))
+        if len(calls) == 3: raise KeyboardInterrupt()
+        return {'url': url, 'name_excerpt': place['가게명'], 'address_excerpt': place['주소'],
+                'tags': ['조용한'], 'tag_parser': 'gsTagName'}
+    monkeypatch.setattr(collector, 'search_blog_urls', search)
+    monkeypatch.setattr(collector, 'fetch_post', fetch)
+    before = db.read_bytes()
+    with pytest.raises(collector.CollectionInterrupted): pilot.collect(path, db, output)
+    saved = json.loads((output / 'collection.json').read_text())
+    assert saved['runs'][0]['audit']['status'] == 'interrupted'
+    assert len(saved['runs'][0]['audit']['posts']) == 1 and len(saved['remaining_targets']) == 5
+    review = json.loads((output / 'review.json').read_text())
+    review['entries'][0].update(identity_match=True, approved_taste_tags=['조용한'], notes='keep manual decision')
+    pilot.save_json(output / 'review.json', review)
+    result = pilot.collect(path, db, output, resume=True)
+    assert result['collected_places'] == 5
+    assert len([c for c in calls if c[0] == 'search']) == 5
+    assert calls.count(('fetch', manifest['targets'][0]['place_id'], 'https://blog.naver.com/synthetic/1')) == 1
+    assert json.loads((output / 'review.json').read_text())['entries'][0] == review['entries'][0]
+    assert db.read_bytes() == before
+    pilot.collect(path, db, output, resume=True)
+    assert len(calls) == 16  # 5 searches + 10 completed fetches + 1 interrupted fetch
+
+
+@pytest.mark.parametrize('tag', ['#서이추', '서 이 추', '이벤트', '행사안내', '천안시', '', '  '])
+def test_extracted_generic_tags_cannot_be_approved(prepared, tag):
+    path, db, output, _ = prepared
+    review = collection_fixture(prepared)
+    collection = json.loads((output / 'collection.json').read_text())
+    collection['runs'][0]['audit']['posts'][0]['tags'].append(tag)
+    pilot.save_json(output / 'collection.json', collection)
+    review['entries'][0]['approved_taste_tags'] = [tag]
+    pilot.save_json(output / 'review.json', review)
+    with pytest.raises(ValueError, match='취향 태그'): pilot.export_reviewed(path, db, output)
+
+
+def test_review_from_unknown_post_is_rejected(prepared):
+    path, db, output, manifest = prepared
+    review = collection_fixture(prepared)
+    review['entries'].append({'place_id': manifest['targets'][0]['place_id'], 'url': 'https://blog.naver.com/x/999',
+                              'identity_match': True, 'approved_taste_tags': []})
+    pilot.save_json(output / 'review.json', review)
+    with pytest.raises(ValueError, match='수집 기록 밖'): pilot.export_reviewed(path, db, output)
+
+
+def test_blog_url_variants_count_as_one_unique_post(monkeypatch, places):
+    monkeypatch.setenv('NAVER_API_ID', 'synthetic')
+    monkeypatch.setenv('NAVER_API_SECRET', 'synthetic')
+    urls = ['https://blog.naver.com/synthetic/1?tracking=true', 'http://m.blog.naver.com/synthetic/1#tag',
+            'https://blog.naver.com/PostView.naver?blogId=synthetic&logNo=1',
+            'file://blog.naver.com/synthetic/2', 'https://blog.naver.com.evil/synthetic/3']
+    monkeypatch.setattr(collector.requests, 'get', lambda *a, **kw: Response(items=[{'link': url} for url in urls]))
+    assert collector.search_blog_urls(places.iloc[0].to_dict())[0] == ['https://blog.naver.com/synthetic/1']
+
+
+def test_resume_rejects_changed_identity_before_request(monkeypatch, places):
+    place = ensure_ids(places.head(1)).iloc[0].to_dict()
+    monkeypatch.setattr(collector, 'search_blog_urls', lambda *a, **kw: (_ for _ in ()).throw(KeyboardInterrupt()))
+    with pytest.raises(collector.CollectionInterrupted) as caught: collector.collect_with_audit(place)
+    with pytest.raises(ValueError, match='ID'):
+        collector.collect_with_audit({**place, '주소': '다른 주소'}, previous=caught.value.result['audit'])
