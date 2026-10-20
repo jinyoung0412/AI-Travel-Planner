@@ -28,7 +28,7 @@
 - 일반 블로그 수집: `blog_tags.csv`; 형제 `blog_tags.audit/<ID hash>.json`과 재시도 이력. raw 태그와 자동 신원 판정은 수동 검토 완료를 뜻하지 않는다.
 - 파일럿: 출력 디렉터리의 `targets.csv`, `preparation.json`, `collection-N.json`, `collection.json`, `review.json` → 수동 검토 → `reviewed_tags.csv`, `review_metrics.json`.
 - 파일럿은 DB를 쓰지 않는다. 내보낸 증거의 DB 반영은 별도 build 단계다.
-- `parse_detail_page`의 6개 반환값, `save_item`의 ID 반환, `collect_place_tags`/`collect_with_audit`의 기존 응답 필드와 기존 인자는 유지했다. 재개/경로 지정은 선택 인자로 추가했다. `load_done_set`의 기존 두 컬럼 상태 계약도 유지한다.
+- `parse_detail_page`의 6개 반환값, `save_item`의 ID 반환, `collect_place_tags`/`collect_with_audit`의 기존 응답 필드와 기존 인자는 유지했다. 재개/경로 지정은 선택 인자로 추가했다. `load_done_set`의 기존 함수 인자는 유지한다. 완료 판정은 아래 2026-10-20 후속 수정에서 실제 글 근거를 재검증하도록 강화했다.
 - 블로그/지오코딩 HTTP는 `Preprocess/crawler/http_client.py:get` 한 곳에 모았다. `requests.get`을 mock하거나 공용 `Session.request`를 금지하면 전체 HTTP를 차단할 수 있다. 실제 브라우저 생성/driver 다운로드는 `driver.py:create_driver`라는 별도 경계다.
 - HTTP 요청당 trace 하나, 최대 2회 시도, timeout/connection/429/5xx만 재시도한다. redirect는 자동 추적하지 않는다. trace에 비밀 키·요청 헤더·예외 원문을 남기지 않는다.
 
@@ -72,3 +72,62 @@ git diff --check
 ```
 
 공용 README/environment/fixture/runner, identity·evidence·DB 빌드/정리/중복제거 모듈과 실제 데이터 파일은 변경하지 않았다. 로컬 커밋은 이 문서와 소유 코드/자체 테스트만 포함하며 통합 담당이 기준 세 커밋 위에 cherry-pick하면 된다.
+
+
+## 2026-10-20 수집·재개 후속 수정
+
+현재 브랜치: `codex/travel-planner-refactor`, worktree: `/Users/seungjinkim/Documents/ChatGPT/오늘충남/worktrees/integration`. 시작 HEAD는 `38f70ac77e53fb9c269bb06f25f6402c104f86c8`이며 기존 개선 12개를 포함한다. 원본 checkout과 사용자 poster_revision/output은 수정하지 않았다.
+
+### 실패 재현
+
+새 `tests/test_collection_resume_safety.py` 최초 11개를 시작 HEAD에서 실행하여 **10 failed / 1 passed**를 확인했다.
+
+1. `verified_posts=[]`, malformed JSON, 다른 이름/주소, 태그 없는 글인데 verified 표시와 위조 집계만 있으면 `_done_ids`가 `naver:123`을 완료로 반환했다. 유효한 글이 있는 기록 1개는 기존에도 통과했다.
+2. 실패 URL이 모든 `finished` URL에 포함되어 이전 audit을 넘겨도 재시도되지 않았다. 파일럿은 정상 글과 실패 글이 섞여 status가 verified인 경우에도 `resume=True`에서 건너뛰었다. 타깃 URL 재시도 선택 인자도 없었다.
+3. 중단된 `naver:123`의 주소를 중앙로 10→20으로 바꾸면 오래된 저널을 previous로 넘겨 ValueError가 나고 다음 장소까지 중단했다. 합성 2곳 배치로 재현했다.
+
+추가 검토에서 canonical ID와 provider 열이 충돌하는 2개 완료 판정도 먼저 실패로 재현한 뒤 보강했다.
+
+### 수정과 공개 계약
+
+- `collect_blog_tags._verified_complete/_done_ids`: 상태와 캐시 집계를 신뢰하지 않고 `tags_from_posts`로 현재 장소의 근거·태그를 다시 계산한다. 이름·주소·공급자 변경, malformed JSON/빈 근거/빈 태그, 서로 다른 provider namespace나 ID 및 정수 문자열의 선행 0을 검사한다. 유효한 완료 기록은 계속 건너뛴다. `load_done_set(path, retry_unverified)` 인자와 집합 반환을 유지한다. 두 컬럼의 verified 플래그만 있는 이전 테스트는 이를 완료로 허용하지 않도록 바꾸고 실제 유효 근거 fixture도 추가했다.
+- 새 `collection_state.py`: 일반 수집·파일럿이 공유할 신원 snapshot 비교, 재시도 가능 판정, 충돌 시에도 이전 파일을 덮지 않는 이력 복사를 담당한다. 초기 저널의 provider 열이 없어도 canonical ID에서 보충하되 이름·주소·identity_key가 달라지면 재사용하지 않는다.
+- `collect_with_audit(..., retry_failed=False)`: 기존 네 인자와 record/audit 모양을 유지하고 선택 인자만 추가한다. previous만 넘기면 미시도 URL만 재개하고, `retry_failed=True`일 때만 timeout/연결 실패/429/5xx URL을 한 번씩 다시 fetch한다. 한 fetch의 실제 HTTP는 기존 공통 경계에서 최대 2회다. 명시적 재시도를 여러 번 부르면 호출마다 한 번씩만 시도하며 내부 무한 반복은 없다. 403/404, 성공·신원 거절·본문 미지원은 이 옵션으로 재요청하지 않는다. 검색 자체의 실패는 자격 증명 복구 가능성을 고려해 명시적 재개에서 다시 시도할 수 있다.
+- 일반 `main(..., retry_failed=False)` / `--retry-failed`: 현재 신원이 일치하는 실패 저널의 고정 URL을 재사용한다. 정상 태그와 실패가 섞여 CSV 상태가 verified여도 이 옵션에서는 실패 URL을 재시도할 수 있다. 기본 재실행은 이미 처리한 실패를 반복 요청하거나 저널을 불필요하게 다시 쓰지 않는다. `--retry-unverified`의 빈 결과·미지원 파싱 새 검색은 별도로 보존한다. 보류된 실패가 `--limit`을 차지해 뒤의 새 장소를 막지 않는다. 저널은 generator로 한 곳씩 읽어 전체 장소의 본문 발췌를 메모리에 한꺼번에 올리지 않는다.
+- 신원이 바뀐 중단 저널은 원문 바이트를 `.history-<UTC>-<고유값>.json`에 보존하고 현재 신원으로 새 수집을 시작한다. 같은 metadata의 정상 중단 재개에서는 검색·완료 글을 반복하지 않고 미시도 글만 이어간다. 공급자 승격/변경 기록은 다른 ID의 근거로 자동 재활용하지 않는다.
+
+### 감사·수동 검토 이력
+
+- `posts`: 고정 URL마다 최신 결과 1개. 최대 30개 고유 글 한도를 유지한다.
+- `post_history`: 교체된 실패의 원문과 교체 시각. 재시도 중 또 중단되면 기존 최신 실패를 먼저 제거하지 않는다.
+- `request_trace`: 전체 실제 HTTP 시도의 누적 목록. 새 post의 `request_trace_range=[start,end]`와 `interrupted_fetches`가 해당 요청 구간을 가리킨다. legacy trace는 그대로 보존한다. 검색 실패는 `search_history`에도 남는다.
+- `fetch_success/fetch_failure`, `identity_accepted/identity_rejected`: 최신 고유 글 기준으로 다시 계산한다. 본문 미지원은 `body_unavailable`이며 신원 거절로 단정하지 않는다. HTTP 재시도 횟수를 채택/거절/정확도의 분모에 더하지 않는다.
+- 파일럿 `collect --resume`: 미시도 및 일시적 실패만 재개한다. `retryable_targets`는 검색 오류와 글별 일시적 실패를 모두 담는다. 정상 글의 사람 판정·승인·메모는 보존한다.
+- 각 review entry는 근거·추출 태그·자동 outcome의 `post_revision`에 연결한다. 내용이나 자동 판정이 바뀌면 기존 entry를 `history`에 복사하고 identity_match=None, approved_taste_tags=[], notes=''로 재검토를 요구한다. 기존 정상 entry의 revision 없는 형식도 최초 재개 checkpoint에서 현재 근거에 연결하며 정상 사람 판정은 유지한다. 요청 시각·trace만의 변경은 정상 판정을 무효화하지 않는다.
+- 재시도 전에 직전 장소별 collection 파일과 기존 reviewed_tags.csv/review_metrics.json을 이력에 보관한다. 오래된 export는 현재 출력 경로에서 제거하고 새 검토를 마친 뒤 재생성한다. collection 저장 뒤 review 저장이 실패한 경우에도 export가 revision/outcome 불일치를 거부하며 다음 재개가 review를 복구한다. 바뀐 실패 글에 예전 승인을 재사용하지 않는다.
+- export의 precision_denominator는 사람이 최신 신원을 판정한 자동 허용 글 수다. `http_attempts`, `latest_fetch_failures`를 별도로 제공한다. HTTP 실패·본문 미지원은 potential_false_negatives로 세지 않으며 신원 자동 거절과 구별한다. 자동 거절 글은 기존처럼 사람 판정만으로 강제 채택하지 않는다.
+
+### 직접 실행한 검증
+
+```sh
+/opt/anaconda3/bin/python -m pytest -q tests/test_collection_resume_safety.py tests/test_blog_pilot.py tests/test_collection_storage.py tests/test_identity_data.py
+/opt/anaconda3/bin/python -m pytest -q
+/opt/anaconda3/bin/python -m compileall -q Preprocess/RunPreprocess/collect_blog_tags.py Preprocess/RunPreprocess/blog_tag_pilot.py Preprocess/RunPreprocess/collection_state.py tests/test_collection_resume_safety.py tests/test_identity_data.py
+/opt/anaconda3/bin/python Preprocess/RunPreprocess/collect_blog_tags.py --help
+/opt/anaconda3/bin/python Preprocess/RunPreprocess/blog_tag_pilot.py --help
+git diff --check
+```
+
+- 새 회귀 **39개**, 관련 합계 **96 passed**, Python 전체 **367 passed / skip 없음**. 기존 joblib 물리 코어 탐지 fallback 경고 1건만 있다. Python 전체에는 기존 Dart mock harness 2개도 포함되며 SDK 추가 권한 요청 없이 실행됐다.
+- 실제 HTTP 경계는 requests.get을 합성 응답/Timeout으로 mock했다. Timeout 2회→명시적 재시도 성공 1회의 누적 HTTP trace는 3개이며 최신 채택 글은 1개임을 검사했다. 반복 실패·재중단·복구, 403/404 제외·429/5xx, 고정 URL 중복/31개 거부, 정상 글 재요청 0회, 수동 판정과 revision 없는 legacy 형식, review 저장 실패 후 복구·export 차단, 이력 이름 충돌 보존도 검사했다.
+- 일반 main의 실제 파일 읽기/쓰기는 pytest 임시 CSV·저널에만 수행했다. 파일럿 수집·검토 테스트는 합성 manifest 또는 checked_targets mock을 사용했으며 운영 manifest를 활성화하지 않았다. tests/conftest.py의 HTTP·모델 차단은 변경하지 않았다.
+- Node/Flutter 코드가 바뀌지 않아 해당 전용 검사는 반복하지 않았다. DB 빌드·마이그레이션 코드도 바꾸지 않아 실제 크기 임시 DB 보존 스크립트를 불필요하게 반복하지 않았다.
+
+실제 DB/파일럿 SHA-256은 시작 전과 후에 아래 값 그대로다. read-only 감사의 장소 13,745·격리 12,144·verified 0 상태를 유지한다.
+
+```text
+places.db: 6e51a45748c26ef6d4239974950098291249246b5f0ae0146b919fabe9d6b3be
+homonym_5.json: 3784c7b8f22365c3033244860ba79b5bb1b9b1dc6a4fd70ba09fe72e85812faa
+```
+
+실제 API 호출·크롤링·키 조회/출력/복사·운영 DB 변경·실제 태그 복구는 수행하지 않았다. 실제 DOM, 자격 증명·쿼터, 신원 정확도·취향 복구는 여전히 미검증이며 `collection_authorized_now=false`를 유지한다. 이번 후속은 현재 브랜치의 로컬 커밋만 남기며 push·main 병합·배포를 하지 않는다. 최종 커밋 SHA와 clean 상태는 이 채팅 최종 보고에 기록한다.

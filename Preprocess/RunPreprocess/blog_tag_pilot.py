@@ -5,6 +5,8 @@ manifest. Raw extraction remains in the local audit; exported evidence contains
 only human-approved taste tags from human-confirmed identities.
 """
 import argparse
+import copy
+from datetime import datetime, timezone
 import hashlib
 import json
 import os
@@ -21,6 +23,7 @@ sys.path.insert(0, str(ROOT))
 from blog_evidence import verify_post
 from Preprocess.RunPreprocess.build_database import read_database
 from Preprocess.RunPreprocess.collect_blog_tags import collect_with_audit, CollectionInterrupted, canonical_blog_url
+from Preprocess.RunPreprocess.collection_state import has_retryable_failures, archive_file
 from Preprocess.crawler.storage import atomic_output
 
 MANIFEST = ROOT / 'Preprocess/pilots/homonym_5.json'
@@ -83,6 +86,36 @@ def prepare(manifest_path=MANIFEST, db=DB, output=OUTPUT):
     return report
 
 
+def _post_revision(post):
+    # Only reviewable content matters: request times and transport traces do not
+    # invalidate an unchanged human decision.
+    fields = ('url', 'outcome', 'name_excerpt', 'address_excerpt', 'provider_url',
+              'tags', 'tag_parser', 'error_type', 'http_status')
+    payload = {key: post[key] for key in fields if key in post}
+    return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+
+
+def _sync_review(entries, runs):
+    known = {(entry['place_id'], entry['url']): entry for entry in entries}
+    for run in runs:
+        for post in run['audit']['posts']:
+            key = (run['place_id'], post['url'])
+            revision = _post_revision(post)
+            entry = known.get(key)
+            if entry is None:
+                entry = {'place_id': run['place_id'], 'url': post['url'],
+                         'identity_match': None, 'approved_taste_tags': [], 'notes': ''}
+                entries.append(entry)
+                known[key] = entry
+            elif ((entry.get('post_revision') is not None and entry['post_revision'] != revision) or
+                  (entry.get('automatic_outcome') is not None and entry['automatic_outcome'] != post['outcome'])):
+                history = entry.setdefault('history', [])
+                history.append({**copy.deepcopy({key: value for key, value in entry.items() if key != 'history'}),
+                                'superseded_at': datetime.now(timezone.utc).isoformat()})
+                entry.update(identity_match=None, approved_taste_tags=[], notes='')
+            entry.update(automatic_outcome=post['outcome'], post_revision=revision)
+
+
 def collect(manifest_path=MANIFEST, db=DB, output=OUTPUT, resume=False):
     manifest, targets = checked_targets(manifest_path, db)
     if manifest.get('collection_authorized_now') is not True:
@@ -125,28 +158,31 @@ def collect(manifest_path=MANIFEST, db=DB, output=OUTPUT, resume=False):
 
     def checkpoint():
         save_json(output / 'collection.json', {'pilot_id': manifest['pilot_id'], 'runs': runs,
-                  'retryable_targets': [run['place_id'] for run in runs if run['audit'].get('search_error')],
+                  'retryable_targets': [run['place_id'] for run in runs if has_retryable_failures(run['audit'])],
                   'remaining_targets': [place['place_id'] for i, place in enumerate(targets)
                                         if i >= len(runs) or runs[i]['audit'].get('status') == 'interrupted' ]})
-        known = {(entry['place_id'], entry['url']) for entry in entries}
-        for run in runs:
-            for post in run['audit']['posts']:
-                key = (run['place_id'], post['url'])
-                if key not in known:
-                    entries.append({'place_id': run['place_id'], 'url': post['url'],
-                                    'automatic_outcome': post['outcome'], 'identity_match': None,
-                                    'approved_taste_tags': [], 'notes': ''})
-                    known.add(key)
+        _sync_review(entries, runs)
         save_json(review_path, {**review, 'entries': entries})
 
     checkpoint()
     for index, place in enumerate(targets):
         previous = runs[index]['audit'] if index < len(runs) else None
-        if previous is not None and previous.get('status') != 'interrupted' and not previous.get('search_error'):
+        if previous is not None and previous.get('status') != 'interrupted' and not has_retryable_failures(previous):
             continue
+        prior_path = output / f'collection-{index + 1}.json'
+        if prior_path.exists():
+            archive_file(prior_path)
+        # Old exports no longer describe the current pending review. Preserve
+        # them as history before changing any evidence, including on interrupt.
+        for filename in ('reviewed_tags.csv', 'review_metrics.json'):
+            export_path = output / filename
+            if export_path.exists():
+                archive_file(export_path)
+                export_path.unlink()
         interrupted = None
         try:
-            result = collect_with_audit(place, max_posts=30, previous=previous)
+            result = collect_with_audit(place, max_posts=30, previous=previous,
+                                        **({'retry_failed': True} if resume else {}))
         except CollectionInterrupted as exc:
             result, interrupted = exc.result, exc
         run = {'place_id': place['place_id'], **result}
@@ -202,8 +238,14 @@ def export_reviewed(manifest_path=MANIFEST, db=DB, output=OUTPUT):
                 raise ValueError('수집 글 URL 중복 또는 최대 개수 초과입니다.')
             urls.add(canonical)
             entry = reviews.get((pid, post['url']))
+            if entry is not None and (
+                (entry.get('post_revision') is not None and entry['post_revision'] != _post_revision(post)) or
+                (entry.get('automatic_outcome') is not None and entry['automatic_outcome'] != post['outcome'])
+            ):
+                raise ValueError('최신 글 근거와 수동 검토가 다릅니다. 재개 후 다시 검토하세요.')
             if post['outcome'] != 'identity_accepted':
-                potential_misses += bool(entry and entry.get('identity_match') is True)
+                potential_misses += bool(post['outcome'] == 'identity_rejected' and
+                                         entry and entry.get('identity_match') is True)
                 continue
             if entry is None or type(entry.get('identity_match')) is not bool:
                 raise ValueError('자동 허용 글 전체에 대한 수동 신원 판정이 필요합니다.')
@@ -230,7 +272,10 @@ def export_reviewed(manifest_path=MANIFEST, db=DB, output=OUTPUT):
     metrics = {'identity_precision': confirmed / denominator if denominator else None,
                'precision_denominator': denominator, 'identity_confirmed': confirmed,
                'places_with_reviewed_taste': len(rows), 'potential_false_negatives': potential_misses,
-               'collected_places': len(seen), 'target_count': 5, 'db_applied': False}
+               'collected_places': len(seen), 'target_count': 5, 'db_applied': False,
+               'http_attempts': sum(len(run['audit'].get('request_trace', [])) for run in collection['runs']),
+               'latest_fetch_failures': sum(post['outcome'] == 'fetch_error'
+                   for run in collection['runs'] for post in run['audit']['posts'])}
     save_json(output / 'review_metrics.json', metrics)
     return metrics
 
@@ -238,7 +283,7 @@ def export_reviewed(manifest_path=MANIFEST, db=DB, output=OUTPUT):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action', choices=['prepare', 'collect', 'export-reviewed'], nargs='?', default='prepare')
-    parser.add_argument('--resume', action='store_true', help='기존 수집·수동 검토를 보존하며 미완료 장소만 재개')
+    parser.add_argument('--resume', action='store_true', help='기존 감사·검토를 보존하며 미완료 및 일시적 실패 URL을 재개·재시도')
     parser.add_argument('--manifest', type=Path, default=MANIFEST)
     parser.add_argument('--db', type=Path, default=DB)
     parser.add_argument('--output-dir', type=Path, default=OUTPUT)

@@ -83,6 +83,14 @@ def test_resume_identity_and_retry_errors(tmp_path, places):
     data = pd.DataFrame([{'place_id': pid, 'blog_tag_status': status} for pid, status in zip(
         p['place_id'], ['verified', 'fetch_error', 'no_verified_posts'])])
     data.to_csv(path, index=False)
+    assert load_done_set(path) == {p.iloc[2]['place_id']}
+    assert not load_done_set(path, True)
+    # A verified flag now needs actual name/address evidence and tagged posts.
+    data = p.assign(blog_tag_status=['verified', 'fetch_error', 'no_verified_posts'])
+    post = {'url': 'https://blog.naver.com/reviewer/123', 'name_excerpt': p.iloc[0]['가게명'],
+            'address_excerpt': p.iloc[0]['주소'], 'tags': ['조용한']}
+    data['verified_posts'] = [json.dumps([post]), '[]', '[]']
+    data.to_csv(path, index=False)
     assert load_done_set(path) == {p.iloc[0]['place_id'], p.iloc[2]['place_id']}
     assert load_done_set(path, True) == {p.iloc[0]['place_id']}
 

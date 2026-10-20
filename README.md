@@ -140,7 +140,13 @@ python Preprocess/RunPreprocess/build_database.py \
 
 의도적 삭제는 `--replace-all`로 별도 지정합니다. 입력에 없는 장소가 삭제되고 **빈 목록이면 전부 삭제됩니다.** 직전 전체 DB는 백업에 보존하고 `removed_place_ids`로 삭제 대상을 확인합니다. 먼저 임시 사본에서 검증하세요.
 
-`--stage crawl`은 실제 브라우저 수집, `--stage prepare`는 Kakao 지오코딩, `--stage blogs`는 Naver 블로그 요청입니다. 경로 검사와 달리 외부 요청이 발생하므로 이번 정리에서 실행하지 않았습니다. `--stage migrate`도 지원합니다. 완료 `.done`은 최종 페이지 확인과 CSV 해시가 맞는 JSON v2만 재사용하며, 과거 단순 DONE 표시는 재점검합니다. CSV 중복은 장소 ID로 병합하며 비어 있지 않은 메타데이터와 유효 근거를 보존합니다. CSV 정제·중복 제거는 원본 백업 후 원자적으로 교체하고 미검증 근거는 `.quarantine.csv`에 남깁니다. 전처리 병합의 별도 감사 기록은 `preprocess_quarantine.csv`이며 생성된 격리 파일은 수집 원본으로 다시 읽지 않습니다. 블로그 수집은 장소별 `.audit` JSON으로 중단을 복구하고, 지오코딩은 성공 좌표 체크포인트를 재사용합니다. 수집 실패는 상태로 기록하고 재시도하며 이름 단독 legacy CSV를 새 스키마 파일에 append하지 않습니다.
+`--stage crawl`은 실제 브라우저 수집, `--stage prepare`는 Kakao 지오코딩, `--stage blogs`는 Naver 블로그 요청입니다. 경로 검사와 달리 외부 요청이 발생하므로 이번 정리에서 실행하지 않았습니다. `--stage migrate`도 지원합니다. 완료 `.done`은 최종 페이지 확인과 CSV 해시가 맞는 JSON v2만 재사용하며, 과거 단순 DONE 표시는 재점검합니다. CSV 중복은 장소 ID로 병합하며 비어 있지 않은 메타데이터와 유효 근거를 보존합니다. CSV 정제·중복 제거는 원본 백업 후 원자적으로 교체하고 미검증 근거는 `.quarantine.csv`에 남깁니다. 전처리 병합의 별도 감사 기록은 `preprocess_quarantine.csv`이며 생성된 격리 파일은 수집 원본으로 다시 읽지 않습니다. 블로그 수집은 장소별 `.audit` JSON으로 중단을 복구하고, 지오코딩은 성공 좌표 체크포인트를 재사용합니다. 수집 실패는 상태로 기록하며 이름 단독 legacy CSV를 새 스키마 파일에 append하지 않습니다.
+
+블로그 수집의 `verified` 완료 판정은 현재 이름·주소·공급자와 일치하는 글 근거와 비어 있지 않은 태그를 재검증합니다. CSV의 상태 문자열이나 저장된 태그 집계만으로 건너뛰지 않습니다. 정상 완료 글은 다시 요청하지 않습니다. 같은 ID라도 이름·주소·공급자가 바뀐 오래된 저널은 `.history-*.json`으로 보존하고 현재 신원으로 새 수집을 시작합니다.
+
+이미 시도한 timeout·연결 실패·429/5xx는 기본 재실행에서 자동 반복하지 않습니다. **이후 실제 수집이 허용된 작업에서만** 일반 수집의 `--retry-failed`를 명시해 고정된 최대 30개 고유 URL 중 일시적 실패만 한 번씩 재시도할 수 있습니다. 각 논리적 글 요청의 HTTP 시도는 기존처럼 최대 2회이며 정상/거절/본문 미지원 글은 이 옵션으로 다시 요청하지 않습니다. `--retry-unverified`는 빈 결과·미지원 파싱을 새 검색으로 다시 수집하는 별도 옵션입니다. 재시도를 기다리는 실패는 `--limit`을 소모해 뒤의 새 장소를 막지 않습니다.
+
+감사의 `posts`와 채택·거절 집계는 고유 URL별 최신 결과, `post_history`는 이전 실패, `request_trace`는 누적 HTTP 시도입니다. 새 글 결과의 `request_trace_range`는 해당 시도의 trace 구간이며 HTTP 시도 수를 신원 정확도의 분모로 사용하지 않습니다.
 
 ### 고정 5곳 파일럿
 
@@ -148,11 +154,11 @@ python Preprocess/RunPreprocess/build_database.py \
 python Preprocess/RunPreprocess/blog_tag_pilot.py prepare
 ```
 
-`Preprocess/pilots/homonym_5.json`의 고정 ID·주소·좌표, DB 해시·행 수를 확인하고 `local_artifacts/homonym_5`에 준비 자료를 만듭니다. 수집 허용 값이 false라 `collect`는 요청 전에 중단합니다. 실제 수집 승인을 받은 별도 작업에서만 키와 허용 값을 설정하세요. 실패·빈 결과가 나와도 표본을 바꾸지 않습니다. 이후 승인된 실제 수집에서 중단한 경우에만 `collect --resume`으로 기존 감사·수동 검토를 보존해 이어갑니다. 수집 후 사람이 `review.json`의 장소 신원과 실제 추출 태그의 부분집합인 취향 태그를 판정해야 합니다. `export-reviewed`는 검토 결과와 정확도 분모를 내보내며 DB는 변경하지 않습니다. 결과 반영은 전체 DB의 임시 사본에 먼저 적용해 ID·비대상 행·격리 기록·백업·반복 실행을 확인합니다.
+`Preprocess/pilots/homonym_5.json`의 고정 ID·주소·좌표, DB 해시·행 수를 확인하고 `local_artifacts/homonym_5`에 준비 자료를 만듭니다. 수집 허용 값이 false라 `collect`는 요청 전에 중단합니다. 실제 수집 승인을 받은 별도 작업에서만 키와 허용 값을 설정하세요. 실패·빈 결과가 나와도 표본을 바꾸지 않습니다. 이후 승인된 실제 수집에서는 `collect --resume`으로 중단된 요청과 일시적 실패 URL만 이어가거나 재시도하며 정상 글의 기존 사람 판정을 보존합니다. 새 근거·자동 판정이 바뀐 글은 예전 판정·승인·메모를 review entry의 `history`에 남기고 미판정으로 되돌립니다. 오래된 내보내기는 이력으로 보관하고 현재 출력에서 제외하며, 재검토를 마치기 전에는 새 내보내기를 허용하지 않습니다. 수집 후 사람이 `review.json`의 장소 신원과 실제 추출 태그의 부분집합인 취향 태그를 판정해야 합니다. `export-reviewed`는 검토 결과와 정확도 분모를 내보내며 DB는 변경하지 않습니다. 결과 반영은 전체 DB의 임시 사본에 먼저 적용해 ID·비대상 행·격리 기록·백업·반복 실행을 확인합니다.
 
 ## 기록과 담당
 
-현재 통합 결과는 [docs/refactor-integration.md](docs/refactor-integration.md), 이전 변경·검증 기록은 [BUGFIX_REPORT.md](BUGFIX_REPORT.md)에 있습니다. 과거 보고의 테스트 개수·구현 설명을 현재 상태로 해석하지 마세요.
+현재 통합 결과는 [docs/refactor-integration.md](docs/refactor-integration.md), 수집·재개 후속 수정과 검증은 [수집 담당 메모](docs/refactor-collection.md)의 2026-10-20 절, 이전 변경·검증 기록은 [BUGFIX_REPORT.md](BUGFIX_REPORT.md)에 있습니다. 과거 보고의 테스트 개수·구현 설명을 현재 상태로 해석하지 마세요.
 
 | 담당 | 역할 |
 |---|---|
