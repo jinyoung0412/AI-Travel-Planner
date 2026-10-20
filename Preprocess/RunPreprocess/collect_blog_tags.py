@@ -19,9 +19,12 @@ from tqdm import tqdm
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
-from place_identity import ensure_ids, text
+from place_identity import ensure_ids, text, place_id as canonical_place_id
 from blog_evidence import address_evidence_excerpt, name_matches, provider_url_matches, tags_from_posts
 
+from Preprocess.RunPreprocess.collection_state import (
+    identity_snapshot, audit_matches_place, retryable_post, has_retryable_failures, archive_file,
+)
 from Preprocess.crawler.http_client import get as _get
 from Preprocess.crawler.storage import atomic_output
 INPUT_CSV = ROOT / 'Preprocess/data/processed/chungnam_places_filtered.csv'
@@ -104,7 +107,16 @@ class CollectionInterrupted(KeyboardInterrupt):
 
 
 def _collection_result(place, audit, interrupted=False):
-    verified = [post for post in audit['posts'] if post['outcome'] == 'identity_accepted']
+    posts = audit['posts']
+    # These are latest unique-URL outcomes, never cumulative HTTP-attempt counts.
+    audit.update(fetch_success=sum(p['outcome'] != 'fetch_error' for p in posts),
+                 fetch_failure=sum(p['outcome'] == 'fetch_error' for p in posts),
+                 identity_accepted=sum(p['outcome'] == 'identity_accepted' for p in posts),
+                 identity_rejected=sum(p['outcome'] == 'identity_rejected' for p in posts),
+                 body_unavailable=sum(p['outcome'] == 'body_unavailable' for p in posts),
+                 tag_payload_unavailable=sum(p['outcome'] in ('identity_accepted', 'identity_rejected') and
+                     p.get('tag_parser', 'gsTagName') != 'gsTagName' for p in posts))
+    verified = [post for post in posts if post['outcome'] == 'identity_accepted']
     tags, verified = tags_from_posts(place, verified)
     status = ('interrupted' if interrupted else 'fetch_error' if audit.get('search_error') else
               'verified' if tags else 'fetch_error' if audit['fetch_failure'] else
@@ -116,55 +128,83 @@ def _collection_result(place, audit, interrupted=False):
             'audit': audit}
 
 
-def collect_with_audit(place, delay=0.2, max_posts=30, previous=None):
+def _check_urls(audit, max_posts):
+    urls = audit.get('urls')
+    if urls is None:
+        return
+    if (not isinstance(urls, list) or len(urls) > max_posts or len(set(urls)) != len(urls) or
+            any(canonical_blog_url(url) != url for url in urls)):
+        raise ValueError('재개 URL 제한 또는 정규화 불일치')
+    posts = audit['posts']
+    if (any(not isinstance(post, dict) or post.get('url') not in urls for post in posts) or
+            len({post['url'] for post in posts}) != len(posts) or
+            any(entry['post']['url'] not in urls for entry in audit.get('post_history', []))):
+        raise ValueError('재개 글이 고정된 URL 목록 밖에 있거나 중복입니다.')
+
+
+def _save_post(audit, post):
+    for index, previous in enumerate(audit['posts']):
+        if previous['url'] == post['url']:
+            audit.setdefault('post_history', []).append({
+                'post': previous, 'superseded_at': datetime.now(timezone.utc).isoformat()})
+            audit['posts'][index] = post
+            return
+    audit['posts'].append(post)
+
+
+def collect_with_audit(place, delay=0.2, max_posts=30, previous=None, retry_failed=False):
+    """Resume untouched URLs; retry transient failures only on explicit request.
+
+    Each selected URL gets one logical fetch per call (HTTP boundary: <=2 tries).
+    Latest outcomes stay unique; superseded failures and every HTTP trace survive.
+    """
     from blog_evidence import verify_post
     if not 1 <= max_posts <= 30:
         raise ValueError('장소당 고유 글은 최대 30개입니다.')
     audit = copy.deepcopy(previous) if previous is not None else {
-        'place_id': place['place_id'],
-        'place_identity': {key: text(place.get(key)) for key in ('identity_key', '가게명', '주소')},
+        'place_id': place['place_id'], 'place_identity': identity_snapshot(place),
         'started_at': datetime.now(timezone.utc).isoformat(),
-        'query': '', 'search_returned_urls': 0, 'fetch_success': 0, 'fetch_failure': 0,
-        'identity_accepted': 0, 'identity_rejected': 0, 'body_unavailable': 0,
-        'tag_payload_unavailable': 0, 'posts': [], 'request_trace': []}
-    if (audit['place_id'] != place['place_id'] or
-            audit.get('place_identity') != {key: text(place.get(key)) for key in ('identity_key', '가게명', '주소')}):
+        'query': '', 'search_returned_urls': 0, 'posts': [], 'request_trace': []}
+    if not audit_matches_place(audit, place):
         raise ValueError('재개할 장소 ID가 다릅니다.')
-    urls = audit.get('urls')
-    if urls is not None and (len(urls) > max_posts or len(set(urls)) != len(urls) or
-                             any(canonical_blog_url(url) != url for url in urls)):
-        raise ValueError('재개 URL 제한 또는 정규화 불일치')
+    _check_urls(audit, max_posts)
+    if audit.get('search_error') and not audit.get('search_history'):
+        audit['search_history'] = [dict(audit['search_error'])]
     try:
-        if urls is None:
+        if audit.get('urls') is None:
+            if previous is not None and audit.get('search_error') and not retry_failed:
+                return _collection_result(place, audit)
             try:
                 urls, query = search_blog_urls(place, display=max_posts, trace=audit['request_trace'])
                 audit.update(query=query, urls=urls, search_returned_urls=len(urls))
                 audit.pop('search_error', None)
+                _check_urls(audit, max_posts)
             except (requests.RequestException, KeyError, ValueError, TypeError, AttributeError) as exc:
                 audit['search_error'] = _failure(exc)
+                audit.setdefault('search_history', []).append(dict(audit['search_error']))
                 return _collection_result(place, audit)
         query = audit['query']
-        finished = {post['url'] for post in audit['posts']}
-        if not finished.issubset(set(urls)):
-            raise ValueError('재개 글이 고정된 URL 목록 밖에 있습니다.')
-        for url in urls:
-            if url in finished:
+        latest = {post['url']: post for post in audit['posts']}
+        for url in audit['urls']:
+            if url in latest and not (retry_failed and retryable_post(latest[url])):
                 continue
+            trace_start = len(audit['request_trace'])
             try:
                 post = fetch_post(url, place, query, trace=audit['request_trace'])
-                audit['fetch_success'] += 1
                 if post is None:
-                    audit['body_unavailable'] += 1
-                    audit['identity_rejected'] += 1
-                    audit['posts'].append({'url': url, 'outcome': 'body_unavailable'})
+                    result = {'url': url, 'outcome': 'body_unavailable'}
                 else:
                     accepted = verify_post(place, post)
-                    audit['identity_accepted' if accepted else 'identity_rejected'] += 1
-                    audit['tag_payload_unavailable'] += post['tag_parser'] != 'gsTagName'
-                    audit['posts'].append({**post, 'outcome': 'identity_accepted' if accepted else 'identity_rejected'})
+                    result = {**post, 'url': url,
+                              'outcome': 'identity_accepted' if accepted else 'identity_rejected'}
             except (requests.RequestException, ValueError) as exc:
-                audit['fetch_failure'] += 1
-                audit['posts'].append({'url': url, 'outcome': 'fetch_error', **_failure(exc)})
+                result = {'url': url, 'outcome': 'fetch_error', **_failure(exc)}
+            except KeyboardInterrupt:
+                audit.setdefault('interrupted_fetches', []).append({
+                    'url': url, 'request_trace_range': [trace_start, len(audit['request_trace'])]})
+                raise
+            result['request_trace_range'] = [trace_start, len(audit['request_trace'])]
+            _save_post(audit, result)
             time.sleep(delay)
     except KeyboardInterrupt:
         raise CollectionInterrupted(_collection_result(place, audit, interrupted=True)) from None
@@ -175,21 +215,63 @@ def collect_place_tags(place, delay=0.2):
     return collect_with_audit(place, delay)['record']
 
 
-def _done_ids(df, retry_unverified=False):
+def _verified_complete(row, current):
+    if text(row.get('blog_tag_status')) != 'verified':
+        return False
+    try:
+        if canonical_place_id(current) != current.get('place_id'):
+            return False
+        snapshot = identity_snapshot(current)
+        current = {**current, 'provider': snapshot['provider'], 'provider_place_id': snapshot['provider_place_id']}
+        tags, posts = tags_from_posts(current, row.get('verified_posts'))
+        return bool(tags and posts)
+    except (TypeError, ValueError, AttributeError):
+        return False
+
+
+def _done_ids(df, retry_unverified=False, current_places=None):
     if 'place_id' not in df or 'blog_tag_status' not in df:
         return set()  # name-only legacy rows never suppress recollection
-    terminal = ['verified'] if retry_unverified else ['verified', 'no_verified_posts']
-    latest = df.drop_duplicates('place_id', keep='last')
-    return set(latest.loc[latest['blog_tag_status'].isin(terminal), 'place_id'])
+    current = (None if current_places is None else
+               {row['place_id']: row for row in current_places.to_dict('records')})
+    done = set()
+    for row in df.drop_duplicates('place_id', keep='last').to_dict('records'):
+        place = row if current is None else current.get(row['place_id'])
+        if place is None or (current is not None and identity_snapshot(row) != identity_snapshot(place)):
+            continue
+        if (_verified_complete(row, place) or
+                (not retry_unverified and row.get('blog_tag_status') == 'no_verified_posts')):
+            done.add(row['place_id'])
+    return done
 
 
 def load_done_set(path=OUTPUT_CSV, retry_unverified=False):
     if not Path(path).exists():
         return set()
-    return _done_ids(pd.read_csv(path, encoding='utf-8-sig', dtype={'place_id': str}), retry_unverified)
+    return _done_ids(pd.read_csv(path, encoding='utf-8-sig', dtype={'place_id': str, 'provider_place_id': str}), retry_unverified)
 
 
-def main(input_path=INPUT_CSV, output_path=OUTPUT_CSV, limit=None, retry_unverified=False, status=None):
+def _resume_plan(checkpoint, place, retry_unverified, retry_failed):
+    if not audit_matches_place(checkpoint, place):
+        return True, None
+    # Explicit broad recollection is distinct from retrying frozen failed URLs.
+    recollect = retry_unverified and checkpoint.get('status') in ('no_verified_posts', 'parse_unavailable')
+    invalid_verified = (checkpoint.get('status') == 'verified' and
+                        not _verified_complete(checkpoint.get('record', {}), place))
+    if recollect or invalid_verified:
+        return True, None
+    urls = checkpoint.get('urls')
+    pending_urls = (urls is None and not checkpoint.get('search_error')) or bool(
+        set(urls or []) - {post['url'] for post in checkpoint.get('posts', [])})
+    if (checkpoint.get('status') != 'interrupted' and not pending_urls and
+            not (retry_failed and has_retryable_failures(checkpoint))):
+        return False, None
+    previous = {key: value for key, value in checkpoint.items()
+                if key not in ('record', 'place', 'collected_at')}
+    return True, previous
+
+
+def main(input_path=INPUT_CSV, output_path=OUTPUT_CSV, limit=None, retry_unverified=False, status=None, retry_failed=False):
     load_dotenv(ROOT / '.env')
     if not os.getenv('NAVER_API_ID') or not os.getenv('NAVER_API_SECRET'):
         raise SystemExit('NAVER_API_ID / NAVER_API_SECRET가 필요합니다. 외부 호출은 수행하지 않았습니다.')
@@ -240,32 +322,40 @@ def main(input_path=INPUT_CSV, output_path=OUTPUT_CSV, limit=None, retry_unverif
         previous = existing[existing['place_id'].eq(row['place_id'])]
         if previous.empty or text(previous.iloc[-1].get('collected_at')) < row['collected_at']:
             upsert(row)
-    done = _done_ids(existing, retry_unverified)
-    by_id = existing.drop_duplicates('place_id', keep='last').set_index('place_id')
-    for place in df.to_dict('records'):
-        if place['place_id'] in done:
-            prior = by_id.loc[place['place_id']]
-            if any(text(prior.get(key)) != text(place.get(key)) for key in ('identity_key', '가게명', '주소')):
-                done.remove(place['place_id'])
-    remaining = df[~df['place_id'].isin(done)]
-    if limit is not None:
-        remaining = remaining.head(limit)
-    try:
-        for index, place in enumerate(tqdm(remaining.to_dict('records'), desc='장소 ID별 수집'), 1):
+    done = _done_ids(existing, retry_unverified, current_places=df)
+    if retry_failed:
+        for place in df.to_dict('records'):
+            journal = audit_dir / (hashlib.sha256(place['place_id'].encode()).hexdigest() + '.json')
+            if journal.exists():
+                audit = json.loads(journal.read_text(encoding='utf-8'))
+                if audit_matches_place(audit, place) and has_retryable_failures(audit):
+                    done.discard(place['place_id'])
+
+    def work():
+        selected = 0
+        for place in df[~df['place_id'].isin(done)].to_dict('records'):
+            if limit is not None and selected >= limit:
+                break
             audit_path = audit_dir / (hashlib.sha256(place['place_id'].encode()).hexdigest() + '.json')
             previous = None
             if audit_path.exists():
                 checkpoint = json.loads(audit_path.read_text(encoding='utf-8'))
-                if checkpoint.get('status') == 'interrupted':
-                    previous = {key: value for key, value in checkpoint.items()
-                                if key not in ('record', 'place', 'collected_at')}
-                else:
-                    import shutil
-                    shutil.copy2(audit_path, audit_path.with_name(
-                        audit_path.stem + f'.history-{datetime.now():%Y%m%d%H%M%S%f}.json'))
+                actionable, previous = _resume_plan(checkpoint, place, retry_unverified, retry_failed)
+                if not actionable:
+                    continue
+            selected += 1
+            # Keep only this place's audit in memory; a full batch can contain
+            # thousands of journals, each with up to 30 article excerpts.
+            yield place, audit_path, previous
+
+    try:
+        for index, (place, audit_path, previous) in enumerate(tqdm(work(), desc='장소 ID별 수집'), 1):
+            if audit_path.exists():
+                # A stale identity starts fresh; exact old bytes remain recoverable.
+                archive_file(audit_path)
             interrupted = None
             try:
-                result = collect_with_audit(place, previous=previous)
+                result = collect_with_audit(place, previous=previous, **({'retry_failed': True} if retry_failed else {}))
             except CollectionInterrupted as exc:
                 result, interrupted = exc.result, exc
             place_fields = {key: place.get(key, '') for key in fields[:6]}
@@ -291,6 +381,7 @@ if __name__ == '__main__':
     parser.add_argument('--limit', type=int)
     parser.add_argument('--test', action='store_true', help='실제 API 호출을 최대 5개로 제한')
     parser.add_argument('--retry-unverified', action='store_true')
+    parser.add_argument('--retry-failed', action='store_true', help='고정 URL의 일시적 실패만 한 번 재시도; 정상 글은 다시 요청하지 않음')
     parser.add_argument('--status', choices=['ambiguous_legacy', 'legacy_unverified', 'needs_collection'])
     args = parser.parse_args()
-    main(args.input, args.output, 5 if args.test else args.limit, args.retry_unverified, args.status)
+    main(args.input, args.output, 5 if args.test else args.limit, args.retry_unverified, args.status, args.retry_failed)
