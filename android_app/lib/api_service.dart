@@ -6,7 +6,7 @@ class ApiService {
   static final ApiClient _client = ApiClient();
 
   static Future<List<String>> suggestTags({required String userText}) =>
-      _client.suggestTags(userText: userText);
+      _client.suggestTags(userText: userText, throwOnError: true);
 
   static Future<Map<String, dynamic>?> getSpotRecommendation({
     required String userText,

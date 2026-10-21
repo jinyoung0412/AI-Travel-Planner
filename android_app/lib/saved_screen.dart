@@ -309,7 +309,7 @@ class SavedScreenState extends State<SavedScreen>
               const SizedBox(height: 8),
               PreferenceNotice(metadata: jsonObject(course['metadata'] ?? {})),
               Text(
-                distanceNotice(course['metric']),
+                distanceNotice(course['metric'], places: spots),
                 style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
               ),
               const Divider(),

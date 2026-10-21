@@ -23,6 +23,8 @@ def extract_name_element(item):
     for selector in selectors:
         for element in item.find_elements('css selector', selector):
             if element.text.strip():
+                # Keep the selected source text for identity. Category suffixes
+                # are removed only in derived display fields by the saver.
                 return element, element.text.strip()
     links = item.find_elements('tag name', 'a')
     target = links[0] if links else item
@@ -37,6 +39,15 @@ def extract_provider_place_id(url):
         return ''
     match = re.search(r'/(?:place|restaurant|cafe|attraction)/(\d+)(?:/|$)', parsed.path)
     return match.group(1) if match else ''
+
+
+def first_available_text(driver, *selectors):
+    """Prefer the narrow field over a containing directions/category wrapper."""
+    for selector in selectors:
+        elements = driver.find_elements('css selector', selector)
+        if elements and elements[0].text.strip():
+            return elements[0].text.strip()
+    return ''
 
 
 def parse_detail_page(driver):
@@ -58,12 +69,8 @@ def parse_detail_page(driver):
     driver.switch_to.frame(frame)
     time.sleep(0.5)
 
-    def first_text(selector):
-        elements = driver.find_elements('css selector', selector)
-        return elements[0].text.strip() if elements else ''
-
-    category = first_text('span.lnJFt, span.DJJvD')
-    address = first_text('span.LDgIH, div.vV_z_')
+    category = first_available_text(driver, 'span.lnJFt', 'span.DJJvD')
+    address = first_available_text(driver, 'span.LDgIH', 'div.vV_z_')
     body = driver.find_element('tag name', 'body').text
 
     def review_count(label):

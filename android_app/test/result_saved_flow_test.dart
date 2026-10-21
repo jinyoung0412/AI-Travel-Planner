@@ -174,4 +174,53 @@ void main() {
     expect(find.text('같은 이름 1'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets(
+    'quality-blocked distance is hidden in both result and saved detail without losing data',
+    (tester) async {
+      final stop = {
+        ...place(1),
+        'coordinate_quality': {
+          'status': 'blocked',
+          'distance_eligible': false,
+          'map_coordinate_eligible': false,
+        },
+      };
+      await tester.pumpWidget(
+        app(
+          CourseResultScreen(
+            courses: [
+              [stop],
+            ],
+            requestedCount: 1,
+            region: '확인 필요',
+            courseMetrics: const [
+              {'estimated_distance_km': 0.9},
+            ],
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.textContaining('코스 거리를 표시하지 않아요'), findsOneWidget);
+      expect(find.textContaining('0.9km'), findsNothing);
+      await tester.tap(find.byIcon(Icons.bookmark_outline_rounded));
+      await tester.pumpAndSettle();
+      final saved = (await LocalStorageService.getSavedCourses()).single;
+      expect(saved['metric'], {'estimated_distance_km': 0.9});
+      expect(
+        saved['spots'][0]['coordinate_quality'],
+        stop['coordinate_quality'],
+      );
+      expect(saved['spots'][0]['lat'], double.parse(stop['lat'] as String));
+      await tester.pumpWidget(app(const SavedScreen()));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('코스 (1)'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('확인 필요'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('코스 거리를 표시하지 않아요'), findsOneWidget);
+      expect(find.textContaining('0.9km'), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
 }

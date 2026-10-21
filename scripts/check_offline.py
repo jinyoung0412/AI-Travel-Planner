@@ -6,8 +6,11 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from scripts.offline_environment import clean_environment
 FROZEN = (ROOT / 'Flask_server/places.db', ROOT / 'Preprocess/pilots/homonym_5.json')
 
 
@@ -45,14 +48,12 @@ def main():
     manifest = json.loads(FROZEN[1].read_text())
     if hashes[FROZEN[0]] != manifest['baseline_db_sha256'] or manifest['collection_authorized_now'] is not False:
         raise SystemExit('Frozen DB or collection authorization differs from the reviewed baseline')
-    env = os.environ.copy()
-    for key in ('ANTHROPIC_API_KEY', 'KAKAO_API_KEY', 'NAVER_API_ID', 'NAVER_API_SECRET'):
-        env[key] = ''
-    env['PLACES_DB_PATH'] = str(FROZEN[0])
     try:
-        for command, cwd in commands(args.component, args.flutter):
-            print(f'[{cwd.relative_to(ROOT) or "."}] {" ".join(command)}', flush=True)
-            subprocess.run(command, cwd=cwd, env=env, check=True)
+        with tempfile.TemporaryDirectory(prefix='travel-offline-launch-') as home:
+            env = clean_environment(os.environ, home)
+            for command, cwd in commands(args.component, args.flutter):
+                print(f'[{cwd.relative_to(ROOT) or "."}] {" ".join(command)}', flush=True)
+                subprocess.run(command, cwd=cwd, env=env, check=True)
     finally:
         changed = [str(p.relative_to(ROOT)) for p, before in hashes.items() if digest(p) != before]
         if changed:

@@ -13,6 +13,9 @@ from urllib.request import ProxyHandler, Request, build_opener
 
 ROOT = Path(__file__).resolve().parents[1]
 DB = ROOT / 'Flask_server/places.db'
+sys.path.insert(0, str(ROOT))
+from scripts.offline_environment import install, allow_gateway_loopback
+install()
 
 
 def forbidden(*args, **kwargs):
@@ -20,6 +23,7 @@ def forbidden(*args, **kwargs):
 
 
 def main():
+    allow_gateway_loopback()
     for key in ('ANTHROPIC_API_KEY', 'KAKAO_API_KEY', 'NAVER_API_ID', 'NAVER_API_SECRET'):
         os.environ[key] = ''
     os.environ['PLACES_DB_PATH'] = str(DB)

@@ -171,7 +171,8 @@ def test_map_geocoding_mocked_and_fails_safely(monkeypatch):
     calls = []
     class Response:
         def raise_for_status(self): pass
-        def json(self): return {'documents': [{'x': '127.1139', 'y': '36.8151'}]}
+        def json(self): return {'documents': [{'x': '127.1139', 'y': '36.8151',
+            'address_type': 'ROAD_ADDR', 'address_name': '충남 천안시 테스트로 1'}]}
     def mock_get(url, **kwargs):
         calls.append((url, kwargs))
         return Response()

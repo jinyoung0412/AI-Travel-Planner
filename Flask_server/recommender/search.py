@@ -16,6 +16,7 @@ from place_identity import ensure_ids
 from .constants import RADIUS_KM
 from .geometry import distances_from
 from .scoring import add_scores
+from .visits import distinct_visits, visit_groups
 
 MAX_SLOTS = 16
 MAX_COURSES = 100
@@ -30,7 +31,7 @@ def _tie(seed, ids):
 
 
 def _matching(pools, used=frozenset()):
-    """Return a distinct ID per remaining slot, or prove Hall infeasibility."""
+    """Return a distinct visit key per remaining slot, or prove Hall infeasibility."""
     owner, assigned = {}, [None] * len(pools)
 
     def assign(slot, seen):
@@ -74,19 +75,20 @@ def _validate(categories, n, start, transport, seed, beam_width):
     return True
 
 
-def _select(complete, n, seed):
+def _select(complete, n, seed, groups):
     selected, selected_ids = [], []
     options = list(complete.values())
     while options and len(selected) < n:
         def rank(item):
             cost, path = item
-            ids = {p['place_id'] for p in path}
+            visit_ids = [groups[p['place_id']] for p in path]
+            ids = set(visit_ids)
             overlap = max((len(ids & previous) / len(path) for previous in selected_ids), default=0)
-            return cost + DIVERSITY_PENALTY * overlap, _tie(seed, [p['place_id'] for p in path])
+            return cost + DIVERSITY_PENALTY * overlap, _tie(seed, visit_ids)
         best = min(options, key=rank)
         options.remove(best)
         selected.append(best[1])
-        selected_ids.append({p['place_id'] for p in best[1]})
+        selected_ids.append({groups[p['place_id']] for p in best[1]})
     return selected
 
 
@@ -103,7 +105,12 @@ def search_courses(df, categories, tags, filter_fn, n=3, start=None,
     # row must not hide another usable row for the same provider place.
     clean = ensure_ids(clean).drop_duplicates('place_id')
     scored = add_scores(clean, tags)
-    pools = [filter_fn(scored, cats, []).sort_values('place_id').to_dict('records') for cats in categories]
+    groups = visit_groups(scored)
+    # Collapse variants within each slot, rather than across all categories: a
+    # duplicate row with a different category must not hide a feasible slot.
+    pools = [distinct_visits(filter_fn(scored, cats, []).sort_values(
+        ['score', 'place_id'], ascending=[False, True])).sort_values('place_id').to_dict('records')
+        for cats in categories]
     sizes = [len(pool) for pool in pools]
     info = {'slot_candidate_counts': sizes, 'constraints_relaxed': [], 'seed': int(seed),
             'requested_count': int(n), 'returned_count': 0,
@@ -111,7 +118,7 @@ def search_courses(df, categories, tags, filter_fn, n=3, start=None,
             'distance_scale_km': RADIUS_KM[transport]}
     if any(size == 0 for size in sizes):
         return [], {**info, 'reason': 'missing_slot_candidates'}
-    pool_ids = [tuple(p['place_id'] for p in pool) for pool in pools]
+    pool_ids = [tuple(groups[p['place_id']] for p in pool) for pool in pools]
     witness = _matching(pool_ids)
     if witness is None:
         return [], {**info, 'reason': 'insufficient_distinct_places'}
@@ -129,7 +136,7 @@ def search_courses(df, categories, tags, filter_fn, n=3, start=None,
         return distances_from(last, coords[slot]) / radius + penalties[slot]
 
     def save(path, cost):
-        complete[tuple(p['place_id'] for p in path)] = (cost / len(pools), path)
+        complete[tuple(groups[p['place_id']] for p in path)] = (cost / len(pools), path)
 
     complete = {}
     exhaustive = math.prod(sizes) <= EXACT_COMBINATIONS
@@ -164,10 +171,10 @@ def search_courses(df, categories, tags, filter_fn, n=3, start=None,
                         place = pool[int(idx)]
                         stats['beam_expansions'] += 1
                         yield (cost + float(local[idx]), path + [place],
-                               used | {place['place_id']}, coords[slot][idx])
+                               used | {groups[place['place_id']]}, coords[slot][idx])
             # Keep only width states in memory, even with large n/beam settings.
             next_states = heapq.nsmallest(width, expansions(),
-                                         key=lambda s: (s[0], _tie(seed, [p['place_id'] for p in s[1]])))
+                                         key=lambda s: (s[0], _tie(seed, [groups[p['place_id']] for p in s[1]])))
             states = next_states
             if not states:
                 break
@@ -185,7 +192,7 @@ def search_courses(df, categories, tags, filter_fn, n=3, start=None,
             future = set(assignment[1:])
             for idx in np.lexsort((ties[slot], local)):
                 place = pools[slot][int(idx)]
-                pid = place['place_id']
+                pid = groups[place['place_id']]
                 if pid in used:
                     continue
                 remaining = assignment[1:]
@@ -206,7 +213,7 @@ def search_courses(df, categories, tags, filter_fn, n=3, start=None,
             visit(0, [], frozenset(), start, 0.0, witness)
             exhaustive = len(complete) < n
 
-    selected = _select(complete, n, seed)
+    selected = _select(complete, n, seed, groups)
     info.update(reason=None if len(selected) == n else 'insufficient_unique_courses',
                 returned_count=len(selected), candidate_space_exhausted=exhaustive,
                 search_stats=stats)

@@ -11,7 +11,8 @@ from Preprocess.RunPreprocess.migrate_place_ids import migrate
 
 
 def sample_post(place, suffix='old'):
-    return {'url': f'https://blog.naver.com/reviewer/{suffix}',
+    log_no = {'old': 1, 'new': 2, 'fresh': 3, 'late': 4, 'current': 5, 'stale': 6}[suffix]
+    return {'url': f'https://blog.naver.com/reviewer/{log_no}',
             'name_excerpt': f"{place['가게명']} 후기", 'address_excerpt': place['주소'],
             'tags': [f'{suffix}-tag']}
 

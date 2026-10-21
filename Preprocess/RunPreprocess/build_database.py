@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 from place_identity import ensure_ids, identity_key, alias_conflicts, local_aliases, text
 from blog_evidence import post_url_key, tags_from_posts, validated_posts
+from place_quality import COORDINATE_COLUMNS, coordinate_pair, coordinates_match_identity
 
 PLACES_CSV = ROOT / 'Preprocess/data/processed/chungnam_places_filtered.csv'
 BLOG_TAGS_CSV = ROOT / 'Preprocess/data/processed/blog_tags.csv'
@@ -74,7 +75,7 @@ def _merge_metadata(old_rows, input_rows, replace_all, metadata_mode):
                 continue
             target = metadata.setdefault(pid, {})
             for key, value in row.items():
-                if key in BLOG_COLUMNS or key in (ALIAS_COLUMN, CONFLICT_COLUMN, *PROVIDER_COLUMNS) or pd.isna(value) or value == '':
+                if key in BLOG_COLUMNS or key in (ALIAS_COLUMN, CONFLICT_COLUMN, *PROVIDER_COLUMNS, *COORDINATE_COLUMNS) or pd.isna(value) or value == '':
                     continue
                 if not incoming or metadata_mode == 'update' or key not in target:
                     target[key] = value
@@ -88,6 +89,20 @@ def _merge_metadata(old_rows, input_rows, replace_all, metadata_mode):
                         target[key] = value
                     else:
                         target.pop(key, None)
+    # Metadata may move a known provider to a new address. Select coordinates
+    # only after that identity is settled, from one matching source row.
+    candidates = {}
+    for row in [*old_rows, *input_rows]:
+        candidates.setdefault(row['place_id'], []).append(row)
+    for pid, place in metadata.items():
+        expected = (identity_key(place) if text(place.get('주소', place.get('address')))
+                    else place['identity_key'])
+        matching = [row for row in candidates[pid] if coordinates_match_identity(row, expected)]
+        selected = matching[-1 if metadata_mode == 'update' else 0] if matching else None
+        pair = coordinate_pair(selected) if selected else (None, None)
+        place.update(latitude=pair[0], longitude=pair[1], coordinate_identity_key=expected,
+                     coordinate_source=(text(selected.get('coordinate_source')) or 'legacy_unknown')
+                     if selected else 'unavailable_for_identity')
     return metadata
 
 
@@ -156,7 +171,7 @@ def merge_verified_tags(places, blog_tags, existing=None, replace_all=False, met
                [(row, True) for row in blog_tags.to_dict('records')])
     hints, collected, quarantine = _merge_evidence(metadata, candidates, sources)
     columns = list(dict.fromkeys([c for c in combined.columns if c not in BLOG_COLUMNS] +
-                                ['place_id', 'identity_key', '가게명', '주소', '카테고리']))
+                                ['place_id', 'identity_key', '가게명', '주소', '카테고리', *COORDINATE_COLUMNS]))
     records = []
     for pid, place in metadata.items():
         tags, posts = tags_from_posts(place, list(collected.get(pid, {}).values()))

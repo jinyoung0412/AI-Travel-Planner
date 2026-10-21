@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'travel_data.dart';
+import 'preferences_transaction.dart';
 
 class LocalStorageService {
   static const _spotsKey = 'saved_spots';
@@ -10,6 +11,7 @@ class LocalStorageService {
 
   static Future<void>? _pending;
   static int _unresolvedSequence = 0;
+  static final _transaction = PreferencesTransaction();
 
   // SharedPreferences has no atomic read-modify-write operation. Queue reads too,
   // since first reads migrate legacy data. The queue is scoped to this isolate.
@@ -20,16 +22,24 @@ class LocalStorageService {
     return () async {
       try {
         if (previous != null) await previous;
-        return await operation();
+        final prefs = await SharedPreferences.getInstance();
+        // Do not run even a migrating read against uncertain native/cache data.
+        await _transaction.recover(prefs);
+        try {
+          final result = await operation();
+          await _transaction.commit(prefs);
+          return result;
+        } catch (_) {
+          // If recovery also fails, its undo record remains and the next
+          // operation must recover successfully before it can proceed.
+          await _transaction.recover(prefs);
+          rethrow;
+        }
       } finally {
         if (identical(_pending, released.future)) _pending = null;
         released.complete();
       }
     }();
-  }
-
-  static Future<void> _stored(Future<bool> result) async {
-    if (!await result) throw StateError('저장소에 기록하지 못했습니다.');
   }
 
   // Mirrors place_identity.py v1; no fuzzy name matching.
@@ -178,10 +188,10 @@ class LocalStorageService {
     }).toList();
     if (prefs.getInt('${key}_schema') != 2) {
       if (!prefs.containsKey('${key}_legacy_backup')) {
-        await _stored(prefs.setString('${key}_legacy_backup', raw));
+        await _transaction.write(prefs, '${key}_legacy_backup', raw);
       }
-      await _stored(prefs.setString(key, jsonEncode(migrated)));
-      await _stored(prefs.setInt('${key}_schema', 2));
+      await _transaction.write(prefs, key, jsonEncode(migrated));
+      await _transaction.write(prefs, '${key}_schema', 2);
     }
     return migrated;
   }
@@ -193,7 +203,7 @@ class LocalStorageService {
     List<Map<String, dynamic>> items,
   ) async {
     final prefs = await SharedPreferences.getInstance();
-    await _stored(prefs.setString(key, jsonEncode(items)));
+    await _transaction.write(prefs, key, jsonEncode(items));
   }
 
   static Future<void> saveSpot(Map<String, dynamic> spot) {

@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'package:ai_travel_app/transit_hubs.dart';
 import 'package:ai_travel_app/input_screen.dart';
 import 'package:ai_travel_app/location_service.dart';
 import 'package:ai_travel_app/recommendation_source.dart';
 import 'package:ai_travel_app/spot_result_screen.dart';
 import 'package:ai_travel_app/course_result_screen.dart';
+import 'package:ai_travel_app/network/tag_suggestion_exception.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -13,6 +15,21 @@ class FakeLocation implements LocationSource {
   FakeLocation(this.next);
   @override
   Future<LocationFix> locate() => next();
+}
+
+class CancellableFakeLocation extends FakeLocation
+    implements CancellableLocationSource {
+  final Completer<LocationFix> pending;
+  int cancels = 0;
+  CancellableFakeLocation() : this._(Completer<LocationFix>());
+  CancellableFakeLocation._(this.pending) : super(() => pending.future);
+  @override
+  Future<void> cancel() async {
+    cancels++;
+    if (!pending.isCompleted) {
+      pending.completeError(const LocationException(LocationFailure.cancelled));
+    }
+  }
 }
 
 class FakeRecommendations implements RecommendationSource {
@@ -283,4 +300,121 @@ void main() {
     expect(selected(tester, '친구와'), true);
     expect(find.textContaining('선택할 태그를 찾지 못했어요'), findsOneWidget);
   });
+
+  for (final reason in [
+    'network_unavailable',
+    'network_timeout',
+    'tags_unavailable',
+    'invalid_response',
+  ]) {
+    testWidgets('AI $reason preserves tags and permits a successful retry', (
+      tester,
+    ) async {
+      final source = FakeRecommendations();
+      await mount(tester, source);
+      await tap(tester, '다음');
+      await tap(tester, '친구와');
+      await tester.enterText(find.byType(TextField), '조용한 카페');
+      await tester.ensureVisible(find.text('AI 태그 자동 선택'));
+      await tester.tap(find.text('AI 태그 자동 선택'));
+      await tester.pump();
+      source.suggestions.single.completeError(TagSuggestionException(reason));
+      await tester.pumpAndSettle();
+      expect(find.text(TagSuggestionException(reason).message), findsOneWidget);
+      expect(find.textContaining('선택할 태그를 찾지 못했어요'), findsNothing);
+      expect(selected(tester, '친구와'), true);
+      expect(
+        tester.widget<TextField>(find.byType(TextField)).controller!.text,
+        '조용한 카페',
+      );
+      await tester.tap(find.text('AI 태그 자동 선택'));
+      await tester.pump();
+      source.suggestions.last.complete(['연인과', '조용한']);
+      await tester.pumpAndSettle();
+      expect(selected(tester, '연인과'), true);
+      expect(selected(tester, '친구와'), false);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  testWidgets('late AI failure after edit and dispose is ignored', (
+    tester,
+  ) async {
+    final source = FakeRecommendations();
+    await mount(tester, source);
+    await tap(tester, '다음');
+    await tester.enterText(find.byType(TextField), '첫 요청');
+    await tester.tap(find.text('AI 태그 자동 선택'));
+    await tester.pump();
+    await tester.enterText(find.byType(TextField), '새 요청');
+    source.suggestions.single.completeError(
+      const TagSuggestionException('network_unavailable'),
+    );
+    await tester.pumpAndSettle();
+    expect(find.textContaining('서버에 연결하지 못했어요'), findsNothing);
+    await tester.tap(find.text('AI 태그 자동 선택'));
+    await tester.pump();
+    await tester.pumpWidget(const MaterialApp(home: SizedBox()));
+    source.suggestions.last.completeError(
+      const TagSuggestionException('network_timeout'),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+  testWidgets(
+    'manual region change and screen disposal cancel pending location',
+    (tester) async {
+      final location = CancellableFakeLocation();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: InputScreen(
+            mode: 'spot',
+            source: FakeRecommendations(),
+            locationSource: location,
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.tap(find.text('천안'));
+      await tester.pumpAndSettle();
+      expect(location.cancels, 1);
+      expect(find.textContaining('위치 확인을 취소'), findsNothing);
+      await tester.pumpWidget(const MaterialApp(home: SizedBox()));
+      await tester.pumpAndSettle();
+      expect(location.cancels, 2);
+      expect(tester.takeException(), isNull);
+    },
+  );
+  for (final region in transitHubs.entries) {
+    for (final hub in region.value) {
+      testWidgets(
+        '${region.key} ${hub.name} uses its public-map origin in both recommendation modes',
+        (tester) async {
+          for (final mode in ['spot', 'course']) {
+            final source = FakeRecommendations();
+            await tester.pumpWidget(const SizedBox());
+            await tester.pumpAndSettle();
+            await mount(tester, source, mode: mode);
+            await tap(tester, region.key);
+            await tap(tester, hub.name);
+            expect(find.textContaining('대표 위치 기준'), findsOneWidget);
+            await tap(tester, '다음');
+            await tap(tester, '친구와');
+            if (mode == 'course') await tap(tester, '다음');
+            await tester.tap(find.text(mode == 'spot' ? '장소 추천받기' : '코스 추천받기'));
+            await tester.pump();
+            expect(source.requests.single.region, region.key);
+            expect(source.requests.single.transport, '대중교통');
+            expect(source.requests.single.lat, hub.lat);
+            expect(source.requests.single.lng, hub.lng);
+            source.responses.single.complete(
+              mode == 'spot' ? {'places': []} : {'courses': []},
+            );
+            await tester.pumpAndSettle();
+            expect(tester.takeException(), isNull);
+          }
+        },
+      );
+    }
+  }
 }

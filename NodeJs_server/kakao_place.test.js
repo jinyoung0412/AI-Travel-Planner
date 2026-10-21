@@ -56,3 +56,18 @@ test('malformed map documents and unrelated URLs cannot prove an identity', () =
         assert.equal(selectIdentityMatch([invalid], input), null);
     }
 });
+
+test('API-01: arbitrary facility and branch suffixes cannot establish identity', () => {
+    for (const [name, suffix] of [['검토공원', '공영주차장'], ['검토박물관', '부설카페'],
+        ['검토카페', '본점'], ['검토카페 본점', '별관']]) {
+        const expected = { ...input, name };
+        const exact = { ...doc, place_name: name };
+        const other = { ...doc, id: '2', place_name: `${name} ${suffix}` };
+        assert.equal(selectIdentityMatch([other], expected), null);
+        assert.equal(selectIdentityMatch([other, exact], expected).id, '1');
+    }
+    assert.equal(selectIdentityMatch([{ ...doc, place_name: '아지트  천안점' }],
+        { ...input, name: ' 아지트\n천안점 ' }).id, '1');
+    assert.equal(selectIdentityMatch([{ ...doc, place_name: '아지트 아산점' }],
+        { ...input, name: '아지트 천안점' }), null);
+});

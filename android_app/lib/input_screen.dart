@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'location_service.dart';
+import 'transit_hubs.dart';
 import 'recommendation_source.dart';
+import 'network/tag_suggestion_exception.dart';
 import 'travel_data.dart';
 
 import 'spot_result_screen.dart';
@@ -39,6 +41,7 @@ class _InputScreenState extends State<InputScreen> {
   String? _locationError;
   bool _locationLoading = false;
   int _locationRevision = 0;
+  late final LocationSource _locationSource;
   int _requestRevision = 0;
   int _tagRevision = 0;
   int _currentStep = 0;
@@ -58,7 +61,7 @@ class _InputScreenState extends State<InputScreen> {
           : null;
     }
     if (_needsHub) {
-      for (final hub in _kTransitHubs[_region] ?? <_TransitHub>[]) {
+      for (final hub in _kTransitHubs[_region] ?? <TransitHub>[]) {
         if (hub.name == _selectedHub) return hub;
       }
       return null;
@@ -72,7 +75,7 @@ class _InputScreenState extends State<InputScreen> {
           ? '현재 위치 확인됨'
           : (_locationLoading ? '위치 가져오는 중...' : '위치를 확인해주세요');
     }
-    if (_needsHub && _selectedHub != null) return '$_selectedHub 출발 기준';
+    if (_needsHub && _selectedHub != null) return '$_selectedHub 대표 위치 기준';
     if (!_needsHub) return '$_region 중심부 기준 (차)';
     return '$_region — 출발지를 선택해주세요';
   }
@@ -92,6 +95,7 @@ class _InputScreenState extends State<InputScreen> {
     _resultCount = _isSpot ? 5 : 3;
     if (!_isSpot) _slotTypes = _defaultTemplate(_spotCount);
     _textController.addListener(_invalidateTags);
+    _locationSource = widget.locationSource ?? DeviceLocationSource();
     _fetchLocation();
   }
 
@@ -163,10 +167,16 @@ class _InputScreenState extends State<InputScreen> {
           ..addAll(toAdd);
         _isTagLoading = false;
       });
-    } catch (_) {
+    } catch (error) {
       if (!mounted || revision != _tagRevision) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('태그를 가져오지 못했어요. 다시 시도해주세요.')),
+        SnackBar(
+          content: Text(
+            error is TagSuggestionException
+                ? error.message
+                : '태그를 가져오지 못했어요. 다시 시도해주세요.',
+          ),
+        ),
       );
     } finally {
       if (mounted && revision == _tagRevision) {
@@ -189,8 +199,7 @@ class _InputScreenState extends State<InputScreen> {
       _gpsLng = null;
     });
     try {
-      final fix = await (widget.locationSource ?? DeviceLocationSource())
-          .locate();
+      final fix = await _locationSource.locate();
       if (!mounted || revision != _locationRevision) return;
       setState(() {
         _gpsLat = fix.lat;
@@ -444,10 +453,13 @@ class _InputScreenState extends State<InputScreen> {
           options: const ['내 주변', '천안', '아산'],
           selected: _region,
           themeColor: _themeColor,
-          onSelect: (r) => setState(() {
-            _region = r;
-            _selectedHub = null;
-          }),
+          onSelect: (r) {
+            if (r != '내 주변') _cancelLocation();
+            setState(() {
+              _region = r;
+              _selectedHub = null;
+            });
+          },
         ),
         if (_region == '내 주변' && _locationError != null) ...[
           const SizedBox(height: 12),
@@ -574,6 +586,14 @@ class _InputScreenState extends State<InputScreen> {
             ),
           ],
         ),
+        if (_needsHub && _selectedHub != null)
+          const Padding(
+            padding: EdgeInsets.only(top: 8),
+            child: Text(
+              '역·터미널의 공개 지도상 대표 위치로 추천해요. 실제 출입구와 승차 위치는 다를 수 있어요. 지도 데이터: © OpenStreetMap contributors (Mapcarta).',
+              style: TextStyle(fontSize: 12, color: Color(0xFF757575)),
+            ),
+          ),
         const SizedBox(height: 8),
       ],
     );
@@ -834,11 +854,21 @@ class _InputScreenState extends State<InputScreen> {
     ),
   );
 
+  void _cancelLocation() {
+    ++_locationRevision;
+    _locationLoading = false;
+    final source = _locationSource;
+    if (source is CancellableLocationSource) {
+      // Cancellation handles failures internally and prevents an unsafe retry.
+      source.cancel();
+    }
+  }
+
   @override
   void dispose() {
     _requestRevision++;
     _tagRevision++;
-    _locationRevision++;
+    _cancelLocation();
     _textController.removeListener(_invalidateTags);
     _textController.dispose();
     super.dispose();
