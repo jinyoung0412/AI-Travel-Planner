@@ -73,13 +73,20 @@ def post_url_key(url):
     parsed = _http_url(url)
     if not parsed or parsed.hostname not in ('blog.naver.com', 'm.blog.naver.com'):
         return ''
+    query = parse_qs(parsed.query, keep_blank_values=True)
     if parsed.path.lower() == '/postview.naver':
-        query = parse_qs(parsed.query)
         blog_id, log_no = query.get('blogId', []), query.get('logNo', [])
-        return f'{blog_id[0]}/{log_no[0]}' if len(blog_id) == len(log_no) == 1 else ''
-    parts = parsed.path.strip('/').split('/')
-    if len(parts) != 2 or any(not p or p in ('.', '..') for p in parts):
+        parts = [blog_id[0], log_no[0]] if len(blog_id) == len(log_no) == 1 else []
+    else:
+        parts = parsed.path.strip('/').split('/')
+    if (len(parts) != 2 or not re.fullmatch(r'[a-zA-Z0-9_-]+', parts[0]) or
+            not re.fullmatch(r'[0-9]+', parts[1])):
         return ''
+    # A path URL may carry tracking parameters, but it cannot name a second
+    # post via reserved identity fields (including duplicate or blank values).
+    for field, expected in zip(('blogId', 'logNo'), parts):
+        if field in query and query[field] != [expected]:
+            return ''
     return '/'.join(parts)
 
 

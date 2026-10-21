@@ -10,12 +10,13 @@ import time
 import types
 from pathlib import Path
 
-import numpy as np
-import pandas as pd
-
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'Flask_server'))
 sys.path.insert(0, str(ROOT))
+from scripts.offline_environment import install
+install()
+import numpy as np
+import pandas as pd
 import app
 from recommendation_ai import route_metrics
 from place_identity import quarantine_legacy

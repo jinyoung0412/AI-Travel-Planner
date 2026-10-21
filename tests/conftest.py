@@ -1,26 +1,26 @@
 import sys
 from pathlib import Path
-import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / 'Flask_server'))
 
+# Install before importing pytest fixtures or collecting application modules.
+from scripts.offline_environment import install
+install()
+
+import pytest
+
+pytest_plugins = ['scripts.offline_pytest']
+
 
 @pytest.fixture(autouse=True)
 def no_external_calls(monkeypatch):
-    import socket
-    import httpx
-    import requests
-    def fail(*args, **kwargs):
-        raise AssertionError('External API calls are forbidden in offline tests')
-    monkeypatch.setattr(requests.sessions.Session, 'request', fail)
-    monkeypatch.setattr(httpx.Client, 'send', fail)
-    monkeypatch.setattr(httpx.AsyncClient, 'send', fail)
-    monkeypatch.setattr(socket.socket, 'connect', fail)
-    monkeypatch.setattr(socket.socket, 'connect_ex', fail)
+    # The process-wide transport boundary is installed during collection and
+    # remains in place after monkeypatch undoes per-test HTTP/SDK fakes.
+    from scripts.offline_environment import forbidden
     import app
-    monkeypatch.setattr(app, '_call_claude', fail)
+    monkeypatch.setattr(app, '_call_claude', forbidden)
 
 
 @pytest.fixture

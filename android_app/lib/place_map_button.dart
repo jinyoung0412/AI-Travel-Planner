@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'api_service.dart';
@@ -12,11 +14,86 @@ Future<String?> _lookupDetail(PlaceData place) => ApiService.getKakaoPlaceUrl(
   address: place.address,
 );
 
-Future<bool> _launch(Uri uri) async {
-  try {
-    return await launchUrl(uri, mode: LaunchMode.externalApplication);
-  } catch (_) {
-    return false;
+// Shared by buttons, saved cards and direct callers. A successful launch future
+// only acknowledges dispatch; the external activity may not be visible yet.
+_MapOpening? _activeOpening;
+
+class _MapOpening with WidgetsBindingObserver {
+  final BuildContext context;
+  final _released = Completer<void>();
+  Timer? _transitionTimer;
+  bool _away = false;
+  bool _returned = false;
+  bool _finished = false;
+  bool _launchUncertain = false;
+
+  _MapOpening(this.context) {
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  bool get canContinue =>
+      !_released.isCompleted &&
+      context.mounted &&
+      !const {
+        AppLifecycleState.paused,
+        AppLifecycleState.hidden,
+        AppLifecycleState.detached,
+      }.contains(WidgetsBinding.instance.lifecycleState);
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.detached) {
+      _release();
+    } else if (state == AppLifecycleState.resumed) {
+      if (_away) {
+        _returned = true;
+        if (_finished) _release();
+      }
+    } else {
+      _away = true;
+      _transitionTimer?.cancel();
+    }
+  }
+
+  Future<bool> launch(Uri uri) async {
+    if (!canContinue) return false;
+    _away = false;
+    _returned = false;
+    try {
+      return await launchUrl(
+        uri,
+        mode: LaunchMode.externalApplication,
+      ).timeout(const Duration(seconds: 5));
+    } on TimeoutException {
+      // Dispatch may still complete on the platform. Do not launch a second URL.
+      _launchUncertain = true;
+      rethrow;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> finish(bool launched) async {
+    _finished = true;
+    if (!(launched || _launchUncertain) ||
+        !context.mounted ||
+        _returned ||
+        _released.isCompleted) {
+      _release();
+    } else if (!_away) {
+      // Some platforms do not emit lifecycle events. Bound that foreground
+      // guard so a successful dispatch never permanently disables retry.
+      _transitionTimer = Timer(const Duration(seconds: 2), _release);
+    }
+    await _released.future;
+  }
+
+  void _release() {
+    if (_released.isCompleted) return;
+    _transitionTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    if (identical(_activeOpening, this)) _activeOpening = null;
+    _released.complete();
   }
 }
 
@@ -80,6 +157,15 @@ Future<void> openPlaceMap(
   bool lookupDetail = false,
   PlaceDetailLookup? detailLookup,
 }) async {
+  // A removed screen must not block a later screen, including direct callers
+  // whose dialog or platform future was pending when its navigator disposed.
+  if (_activeOpening != null && !_activeOpening!.context.mounted) {
+    _activeOpening!._release();
+  }
+  if (!context.mounted || _activeOpening != null) return;
+  final opening = _MapOpening(context);
+  _activeOpening = opening;
+  var launched = false;
   try {
     final place = PlaceData.fromJson(placeJson);
     final lat = place.lat;
@@ -87,41 +173,75 @@ Future<void> openPlaceMap(
     var detail = place.kakaoUrl;
     if (lookupDetail && lat != null && lng != null) {
       try {
-        detail = await (detailLookup ?? _lookupDetail)(place) ?? '';
+        detail =
+            await (detailLookup ?? _lookupDetail)(
+              place,
+            ).timeout(const Duration(seconds: 36)) ??
+            '';
       } catch (_) {
         detail = '';
       }
     }
-    if (!context.mounted) return;
-    if (detail.isNotEmpty) {
-      final uri = Uri.tryParse(detail);
-      if (uri != null &&
-          (uri.scheme == 'https' || uri.scheme == 'http') &&
-          await _launch(uri)) {
-        return;
-      }
+    if (!context.mounted || !opening.canContinue) return;
+    if (RegExp(r'^https?://place\.map\.kakao\.com/\d+$').hasMatch(detail)) {
+      final uri = Uri.parse(detail.replaceFirst(RegExp(r'^http:'), 'https:'));
+      launched = await opening.launch(uri);
+      if (launched) return;
     }
-    if (!context.mounted) return;
+    if (!context.mounted || !opening.canContinue) return;
     if (lat == null || lng == null) throw const FormatException('위치 정보가 없습니다.');
-    if (lookupDetail && context.mounted) {
+    if (!place.coordinateMapAllowed) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('장소 상세를 확인하지 못했어요. 위치를 표시할게요.')),
+        const SnackBar(
+          content: Text('좌표 품질 확인이 필요한 장소예요. 좌표 지도 대신 장소 이름과 주소를 확인해주세요.'),
+        ),
       );
+      return;
     }
+    // Neither a concrete address nor finite coordinates proves location
+    // accuracy. Older saved records have no coordinate-quality contract.
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        scrollable: true,
+        title: const Text('참고 위치 열기'),
+        content: Text(
+          '${place.name}\n${place.address}\n\n'
+          '저장된 좌표가 실제 장소와 일치하는지 확인되지 않았어요. '
+          '지도에서 장소 이름과 주소를 다시 확인해주세요.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('취소'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('참고 위치 열기'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !opening.canContinue) return;
     final app = Uri.parse('kakaomap://look?p=$lat,$lng');
     bool canOpenApp;
     try {
-      canOpenApp = await canLaunchUrl(app);
+      canOpenApp = await canLaunchUrl(app).timeout(const Duration(seconds: 5));
     } catch (_) {
       canOpenApp = false;
     }
-    if (!context.mounted) return;
-    if (canOpenApp && await _launch(app)) return;
-    if (!context.mounted) return;
-    final web = Uri.parse(
-      'https://map.kakao.com/link/map/${Uri.encodeComponent(place.name)},$lat,$lng',
-    );
-    if (!await _launch(web)) {
+    if (!opening.canContinue) return;
+    if (canOpenApp) {
+      launched = await opening.launch(app);
+      if (launched) return;
+    }
+    if (!opening.canContinue) return;
+    // Kakao's documented coordinate-only link keeps labels out of the routing
+    // fields: an encoded label comma can redirect mobile web to its home page.
+    // Keep the original name/address in the consent notice and saved record.
+    final web = Uri.parse('https://map.kakao.com/link/map/$lat,$lng');
+    launched = await opening.launch(web);
+    if (!launched) {
       throw StateError('지도 실행 실패');
     }
   } catch (_) {
@@ -130,5 +250,7 @@ Future<void> openPlaceMap(
         const SnackBar(content: Text('지도를 열 수 없어요. 위치 정보와 지도 앱을 확인해주세요.')),
       );
     }
+  } finally {
+    await opening.finish(launched);
   }
 }

@@ -23,8 +23,8 @@ sys.path.insert(0, str(ROOT))
 from blog_evidence import verify_post
 from Preprocess.RunPreprocess.build_database import read_database
 from Preprocess.RunPreprocess.collect_blog_tags import collect_with_audit, CollectionInterrupted, canonical_blog_url
-from Preprocess.RunPreprocess.collection_state import has_retryable_failures, archive_file
-from Preprocess.crawler.storage import atomic_output
+from Preprocess.RunPreprocess.collection_state import has_retryable_failures, archive_file, audit_matches_place
+from Preprocess.crawler.storage import atomic_output, exclusive_output
 
 MANIFEST = ROOT / 'Preprocess/pilots/homonym_5.json'
 OUTPUT = ROOT / 'local_artifacts/homonym_5'
@@ -116,6 +116,57 @@ def _sync_review(entries, runs):
             entry.update(automatic_outcome=post['outcome'], post_revision=revision)
 
 
+def _load_runs(output, manifest, targets, *, require_consistent=False):
+    """Read checkpoints without publishing or changing any manual decisions.
+
+    Resume restores journals saved before a failed summary publication. Export
+    must instead refuse stale/missing summaries so new evidence gets reviewed.
+    Summary-only legacy records remain readable when no journal supersedes them.
+    """
+    summary_path = output / 'collection.json'
+    if summary_path.exists():
+        summary = json.loads(summary_path.read_text(encoding='utf-8'))
+        if not isinstance(summary, dict) or summary.get('pilot_id') != manifest['pilot_id']:
+            raise ValueError('기존 수집의 pilot_id가 다릅니다.')
+        runs = summary.get('runs')
+        if not isinstance(runs, list):
+            raise ValueError('기존 수집 요약 형식이 다릅니다.')
+    elif require_consistent:
+        raise ValueError('수집 요약이 없습니다. collect --resume으로 복구 후 다시 검토하세요.')
+    else:
+        runs = []
+
+    def validate(run, index):
+        if (index >= len(targets) or not isinstance(run, dict) or
+                run.get('place_id') != targets[index]['place_id'] or
+                not isinstance(run.get('audit'), dict) or
+                not isinstance(run['audit'].get('posts'), list)):
+            raise ValueError('기존 수집 순서 또는 고정 ID 불일치')
+        audit = run['audit']
+        if (('place_id' in audit and audit['place_id'] != run['place_id']) or
+                ('place_identity' in audit and not audit_matches_place(audit, targets[index]))):
+            raise ValueError('기존 수집의 고정 표본 신원이 다릅니다.')
+
+    for index, run in enumerate(runs):
+        validate(run, index)
+    latest = dict(enumerate(runs))
+    for checkpoint in sorted(output.glob('collection-*.json')):
+        if '.history-' in checkpoint.name:
+            continue
+        match = re.fullmatch(r'collection-([1-9][0-9]*)\.json', checkpoint.name)
+        if match is None:
+            raise ValueError('고정 표본 밖의 수집 체크포인트입니다.')
+        index = int(match[1]) - 1
+        run = json.loads(checkpoint.read_text(encoding='utf-8'))
+        validate(run, index)
+        if require_consistent and (index >= len(runs) or run != runs[index]):
+            raise ValueError('최신 수집 저널과 요약이 다릅니다. collect --resume으로 복구 후 다시 검토하세요.')
+        latest[index] = run
+    if sorted(latest) != list(range(len(latest))):
+        raise ValueError('고정 표본 수집 체크포인트 순서가 누락됐습니다.')
+    return [latest[index] for index in range(len(latest))]
+
+
 def collect(manifest_path=MANIFEST, db=DB, output=OUTPUT, resume=False):
     manifest, targets = checked_targets(manifest_path, db)
     if manifest.get('collection_authorized_now') is not True:
@@ -124,6 +175,11 @@ def collect(manifest_path=MANIFEST, db=DB, output=OUTPUT, resume=False):
     if not all(os.getenv(k) for k in ('NAVER_API_ID', 'NAVER_API_SECRET')):
         raise ValueError('NAVER_API_ID / NAVER_API_SECRET 누락: 외부 요청 0회.')
     output = Path(output)
+    with exclusive_output(output / '.pilot'):
+        return _collect(manifest, targets, output, resume)
+
+
+def _collect(manifest, targets, output, resume):
     existing = (output / 'collection.json').exists() or any(output.glob('collection-*.json'))
     if existing and not resume:
         raise ValueError('기존 수집 기록이 있습니다. 재개는 --resume으로 명시하세요.')
@@ -135,25 +191,7 @@ def collect(manifest_path=MANIFEST, db=DB, output=OUTPUT, resume=False):
         raise ValueError('기존 검토의 pilot_id가 다릅니다.')
     if review['entries'] and not resume:
         raise ValueError('기존 수동 검토를 덮어쓸 수 없습니다.')
-    runs = []
-    if existing:
-        summary_path = output / 'collection.json'
-        summary = json.loads(summary_path.read_text(encoding='utf-8')) if summary_path.exists() else {
-            'pilot_id': manifest['pilot_id'], 'runs': []}
-        if summary.get('pilot_id') != manifest['pilot_id']:
-            raise ValueError('기존 수집의 pilot_id가 다릅니다.')
-        runs = summary['runs']
-        # A crash between the per-place checkpoint and summary must not recollect that place.
-        for index, place in enumerate(targets):
-            checkpoint = output / f'collection-{index + 1}.json'
-            if checkpoint.exists():
-                run = json.loads(checkpoint.read_text(encoding='utf-8'))
-                if len(runs) <= index:
-                    runs.append(run)
-                else:
-                    runs[index] = run
-        if len(runs) > len(targets) or any(run['place_id'] != targets[i]['place_id'] for i, run in enumerate(runs)):
-            raise ValueError('기존 수집 순서 또는 고정 ID 불일치')
+    runs = _load_runs(output, manifest, targets) if existing else []
     entries = review['entries']
 
     def checkpoint():
@@ -212,11 +250,16 @@ def is_taste_tag(tag, place):
 def export_reviewed(manifest_path=MANIFEST, db=DB, output=OUTPUT):
     """Export curated evidence only. Applying it remains a separate DB operation."""
     manifest, targets = checked_targets(manifest_path, db)
-    target_map = {p['place_id']: p for p in targets}
     output = Path(output)
-    collection = json.loads((output / 'collection.json').read_text(encoding='utf-8'))
+    with exclusive_output(output / '.pilot'):
+        return _export_reviewed(manifest, targets, output)
+
+
+def _export_reviewed(manifest, targets, output):
+    target_map = {p['place_id']: p for p in targets}
+    runs = _load_runs(output, manifest, targets, require_consistent=True)
     review = json.loads((output / 'review.json').read_text(encoding='utf-8'))
-    if collection['pilot_id'] != manifest['pilot_id'] or review['pilot_id'] != manifest['pilot_id']:
+    if review['pilot_id'] != manifest['pilot_id']:
         raise ValueError('검토 대상 파일의 pilot_id가 다릅니다.')
     reviews = {}
     for entry in review['entries']:
@@ -226,7 +269,7 @@ def export_reviewed(manifest_path=MANIFEST, db=DB, output=OUTPUT):
         reviews[key] = entry
     rows, denominator, confirmed, potential_misses = [], 0, 0, 0
     seen = set()
-    for run in collection['runs']:
+    for run in runs:
         pid = run['place_id']
         if pid not in target_map or pid in seen:
             raise ValueError('고정 표본 밖의 ID 또는 중복 수집입니다.')
@@ -264,7 +307,7 @@ def export_reviewed(manifest_path=MANIFEST, db=DB, output=OUTPUT):
         if kept:
             rows.append({'place_id': pid, 'blog_tag_status': 'verified',
                          'verified_posts': json.dumps(kept, ensure_ascii=False)})
-    collected_keys = {(run['place_id'], post['url']) for run in collection['runs'] for post in run['audit']['posts']}
+    collected_keys = {(run['place_id'], post['url']) for run in runs for post in run['audit']['posts']}
     if set(reviews) - collected_keys:
         raise ValueError('수집 기록 밖의 수동 검토 항목입니다.')
     with atomic_output(output / 'reviewed_tags.csv', encoding='utf-8-sig') as stream:
@@ -273,9 +316,9 @@ def export_reviewed(manifest_path=MANIFEST, db=DB, output=OUTPUT):
                'precision_denominator': denominator, 'identity_confirmed': confirmed,
                'places_with_reviewed_taste': len(rows), 'potential_false_negatives': potential_misses,
                'collected_places': len(seen), 'target_count': 5, 'db_applied': False,
-               'http_attempts': sum(len(run['audit'].get('request_trace', [])) for run in collection['runs']),
+               'http_attempts': sum(len(run['audit'].get('request_trace', [])) for run in runs),
                'latest_fetch_failures': sum(post['outcome'] == 'fetch_error'
-                   for run in collection['runs'] for post in run['audit']['posts'])}
+                   for run in runs for post in run['audit']['posts'])}
     save_json(output / 'review_metrics.json', metrics)
     return metrics
 

@@ -14,6 +14,7 @@ from Preprocess.crawler.saver import (
 )
 from place_identity import place_id
 from Preprocess.crawler.throttler import throttle_click_delay, throttle_page_delay
+from Preprocess.crawler.storage import exclusive_output
 
 logger = logging.getLogger(__name__)
 
@@ -158,6 +159,7 @@ class ChungnamCrawler:
                     raise RuntimeError("Search list changed before all items were read")
                 item = current_items[idx]
                 el, name = extract_name_element(item)
+                source_list_text = getattr(item, 'text', '')
 
                 if not name:
                     raise RuntimeError("Place name unavailable")
@@ -214,7 +216,8 @@ class ChungnamCrawler:
                     "category_source": "provider" if cat else "search_fallback",
                     "keyword": keyword, "visitor_review": v_rev,
                     "blog_review": b_rev, "operating_time": op_time,
-                    "provider": "naver" if provider_id else "", "provider_place_id": provider_id
+                    "provider": "naver" if provider_id else "", "provider_place_id": provider_id,
+                    "source_list_text": source_list_text,
                 })
                 existing.add(identity)
                 new_count += 1
@@ -247,30 +250,33 @@ class ChungnamCrawler:
             for category in categories:
                 result = {'region': region, 'category': category, 'status': 'failed'}
                 try:
-                    if is_task_completed(region, category):
-                        result['status'] = 'skipped'
-                        continue
-                    # A fresh browser isolates broken sessions between categories.
-                    self.start_driver()
-                    self.open_naver_map()
-                    keyword = f"{region} {category}"
                     csv_path = get_csv_path(region, category)
-                    touch_init_file(csv_path)
-                    # Deduplicate within a search, keeping category provenance in other CSVs.
-                    existing = load_existing_ids(csv_path)
-                    if self.prepare_list(keyword) != "OK":
-                        raise RuntimeError("Search list unavailable")
-                    for page in range(1, 11):
-                        if not self.scroll_list():
-                            raise RuntimeError("Search list could not be scrolled")
-                        self.process_page(region, category, keyword, csv_path, existing, page)
-                        if not go_next_page(self.driver):
-                            mark_task_completed(region, category)
-                            result['status'] = 'completed'
-                            break
-                        if page == 10:
-                            raise RuntimeError("Page limit reached before final page")
-                        throttle_page_delay()
+                    # Whole-task ownership prevents a second crawler from marking
+                    # the same search done while this one is still paging/saving.
+                    with exclusive_output(csv_path + '.task'):
+                        if is_task_completed(region, category):
+                            result['status'] = 'skipped'
+                            continue
+                        # A fresh browser isolates broken sessions between categories.
+                        self.start_driver()
+                        self.open_naver_map()
+                        keyword = f"{region} {category}"
+                        touch_init_file(csv_path)
+                        # Deduplicate within a search, keeping category provenance in other CSVs.
+                        existing = load_existing_ids(csv_path)
+                        if self.prepare_list(keyword) != "OK":
+                            raise RuntimeError("Search list unavailable")
+                        for page in range(1, 11):
+                            if not self.scroll_list():
+                                raise RuntimeError("Search list could not be scrolled")
+                            self.process_page(region, category, keyword, csv_path, existing, page)
+                            if not go_next_page(self.driver):
+                                mark_task_completed(region, category)
+                                result['status'] = 'completed'
+                                break
+                            if page == 10:
+                                raise RuntimeError("Page limit reached before final page")
+                            throttle_page_delay()
                 except KeyboardInterrupt:
                     result['status'] = 'interrupted'
                     raise

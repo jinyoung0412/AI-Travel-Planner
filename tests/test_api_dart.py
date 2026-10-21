@@ -11,14 +11,16 @@ import subprocess
 from urllib.parse import unquote, urlparse
 
 import pytest
+from scripts.offline_environment import validated_dart_binary
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGES = ROOT / 'android_app/.dart_tool/package_config.json'
 
 
 def dart_sdk():
-    if os.environ.get('DART_BIN'):
-        return os.environ['DART_BIN']
+    explicit = validated_dart_binary(os.environ)
+    if explicit:
+        return explicit
     if PACKAGES.exists():
         packages = json.loads(PACKAGES.read_text())['packages']
         flutter = next((p for p in packages if p['name'] == 'flutter'), None)

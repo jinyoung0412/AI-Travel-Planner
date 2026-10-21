@@ -65,4 +65,68 @@ void main() {
       );
     }
   });
+  test(
+    'coordinate-quality restrictions survive DTO round trip without inventing verification',
+    () {
+      for (final quality in [
+        null,
+        'bad',
+        {'status': 'unverified', 'map_coordinate_eligible': true},
+      ]) {
+        final place = PlaceData.fromJson({
+          'coordinate_quality': quality,
+          'address': '충남 천안시 충절로 410',
+        });
+        expect(place.coordinateMapAllowed, true);
+        expect(place.coordinateDistanceAllowed, true);
+        expect(place.toJson()['coordinate_quality'], quality);
+        expect(
+          distanceNotice(
+            {'estimated_distance_km': 1.2},
+            places: [place.toJson()],
+          ),
+          contains('실제 장소 위치와 다를 수 있어요'),
+        );
+      }
+      for (final quality in [
+        {'status': 'blocked'},
+        {'map_coordinate_eligible': false, 'distance_eligible': false},
+      ]) {
+        final place = PlaceData.fromJson({'coordinate_quality': quality});
+        expect(place.coordinateMapAllowed, false);
+        expect(place.coordinateDistanceAllowed, false);
+        expect(place.toJson()['coordinate_quality'], quality);
+        expect(
+          distanceNotice(
+            {'estimated_distance_km': 1.2},
+            places: [place.toJson()],
+          ),
+          isNot(contains('km')),
+        );
+      }
+    },
+  );
+  test(
+    'wrapped and legacy metadata retain optional spatial limit alongside taste evidence',
+    () {
+      const limitation = '주변 장소와의 거리는 적용하지 않았습니다.';
+      for (final wrapped in [false, true]) {
+        final payload = {
+          'places': <Object>[],
+          'metadata': {
+            'spatial_relation_limitation': limitation,
+            'preference_evidence': 'unavailable',
+            'preference_limitation': '취향 근거 없음',
+          },
+        };
+        final data = RecommendationData.fromJson(
+          wrapped ? {'data': payload} : payload,
+        );
+        expect(data.metadata['spatial_relation_limitation'], limitation);
+        expect(data.metadata['preference_evidence'], 'unavailable');
+        expect(data.places, isEmpty);
+      }
+      expect(RecommendationData.fromJson({'places': []}).metadata, isEmpty);
+    },
+  );
 }

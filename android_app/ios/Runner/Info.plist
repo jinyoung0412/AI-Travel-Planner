@@ -49,5 +49,7 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>내 주변 장소를 추천하기 위해 현재 위치를 사용합니다. 위치를 허용하지 않아도 지역을 직접 선택할 수 있습니다.</string>
 </dict>
 </plist>

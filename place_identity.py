@@ -121,27 +121,54 @@ def ensure_ids(df):
         return result
     rows = result.to_dict('records')
     result['identity_key'] = [identity_key(r) for r in rows]
+    if 'latitude' in result or 'longitude' in result:
+        # Bind a legacy pair before recomputing a stale identity_key. A caller
+        # changing the address cannot silently re-label coordinates from it.
+        result['coordinate_identity_key'] = [
+            text(r.get('coordinate_identity_key')) or text(r.get('identity_key')) or key
+            for r, key in zip(rows, result['identity_key'])]
     result['place_id'] = [place_id(r) for r in rows]
     if 'provider_place_id' in result:
         result['provider_place_id'] = [provider_identifier(r.get('provider_place_id')) for r in rows]
-    # Persisted aliases survive address changes. A local row may upgrade only
-    # when ALL its known aliases point to exactly one provider; providers never
-    # redirect each other, even if their names/addresses or old aliases coincide.
+    # Resolve the complete alias component before promoting any row. Promoting
+    # one bridge first would hide a second provider on the other end of it.
     aliases = [local_aliases(r) | local_aliases({**r, 'identity_key': alias})
+               | set(alias_conflicts(r))
                for r, alias in zip(rows, result['identity_key'])]
-    providers = {}
-    for row in rows:
-        for alias, owners in alias_conflicts(row).items():
-            providers.setdefault(alias, set()).update(owners)
-    for pid, candidates in zip(result['place_id'], aliases):
+    parent = {alias: alias for candidates in aliases for alias in candidates}
+
+    def component(alias):
+        while parent[alias] != alias:
+            parent[alias] = parent[parent[alias]]
+            alias = parent[alias]
+        return alias
+
+    for candidates in aliases:
+        ordered = sorted(candidates)
+        for alias in ordered[1:]:
+            parent[component(alias)] = component(ordered[0])
+    components, providers = {}, {}
+    for alias in parent:
+        components.setdefault(component(alias), set()).add(alias)
+    for pid, candidates, row in zip(result['place_id'], aliases, rows):
+        owners = set().union(*alias_conflicts(row).values()) if alias_conflicts(row) else set()
         if not pid.startswith('local:v1:'):
-            for alias in candidates:
-                providers.setdefault(alias, set()).add(pid)
+            owners.add(pid)
+        for alias in candidates:
+            providers.setdefault(component(alias), set()).update(owners)
     promoted = []
+    persisted_aliases, persisted_conflicts = [], []
     for pid, candidates in zip(result['place_id'], aliases):
-        matches = set().union(*(providers.get(a, set()) for a in candidates))
+        root = component(next(iter(candidates))) if candidates else None
+        matches = providers.get(root, set())
         promoted.append(next(iter(matches)) if pid.startswith('local:v1:') and len(matches) == 1 else pid)
+        known_aliases = components.get(root, set())
+        persisted_aliases.append(json.dumps(sorted(known_aliases), ensure_ascii=False))
+        conflicts = {a: sorted(matches) for a in sorted(known_aliases)} if len(matches) > 1 else {}
+        persisted_conflicts.append(json.dumps(conflicts, ensure_ascii=False, sort_keys=True))
     result['place_id'] = promoted
+    result['identity_aliases'] = persisted_aliases
+    result['identity_alias_conflicts'] = persisted_conflicts
     if any(':' in pid and not pid.startswith('local:v1:') for pid in promoted):
         pairs = []
         for pid, row in zip(promoted, rows):
@@ -159,6 +186,11 @@ def quarantine_legacy(df):
     from blog_evidence import tags_from_posts
 
     result = ensure_ids(df)
+    if result['place_id'].duplicated().any():
+        # Runtime callers deduplicate canonical IDs. Union proof before that
+        # boundary so a first, unverified row cannot hide a later valid post.
+        from Preprocess.RunPreprocess.build_database import merge_verified_tags
+        result, _ = merge_verified_tags(result, pd.DataFrame())
     if 'blog_tags' not in result:
         result['blog_tags'] = '{}'
     verified = result.get('blog_tag_status', pd.Series('', index=result.index)).eq('verified')

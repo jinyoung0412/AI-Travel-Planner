@@ -1,7 +1,8 @@
 const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
-const { findPlace } = require('./kakao_place');
+const { findPlace, KAKAO_TIMEOUT_MS } = require('./kakao_place');
+const { upstreamRequest } = require('./upstream_request');
 require('dotenv').config({ path: require('path').join(__dirname, '..', '.env'), quiet: true });
 
 function positiveInteger(value, fallback, max) {
@@ -22,10 +23,14 @@ function createApp({ httpClient = axios, env = process.env } = {}) {
     app.use(express.json({ limit: '16kb' }));
 
     async function forwardToFlask(req, res, path, resultField) {
+        const upstream = upstreamRequest(req, res, timeout);
         try {
+            if (!upstream.canRespond()) return;
             const response = await httpClient.post(`${flask}${path}`, req.body, {
-                timeout, maxContentLength: 512 * 1024, maxRedirects: 0,
+                timeout, signal: upstream.signal, maxContentLength: 512 * 1024, maxRedirects: 0,
             });
+            if (!upstream.canRespond()) return;
+            upstream.checkDeadline();
             const body = response.data;
             if (!body || typeof body !== 'object' || Array.isArray(body) || !Array.isArray(body[resultField])) {
                 return res.status(502).json({ success: false,
@@ -33,25 +38,28 @@ function createApp({ httpClient = axios, env = process.env } = {}) {
             }
             return res.status(200).json({ success: true, data: body });
         } catch (error) {
+            if (!upstream.canRespond()) return;
+            const timedOut = upstream.timedOut || ['ECONNABORTED', 'ETIMEDOUT'].includes(error.code);
             const status = error.response?.status;
             const body = error.response?.data;
             // Only schema/constraint failures and documented service failures cross the boundary.
             // HTML, stack traces and transport exception strings never reach the app.
-            if ([400, 422, 503].includes(status) && body && typeof body === 'object' &&
+            if (!timedOut && [400, 422, 503].includes(status) && body && typeof body === 'object' &&
                 !Array.isArray(body) && typeof body.error === 'string' &&
                 ['invalid_request', 'outside_service_area', 'category_required', 'category_unavailable', 'tags_unavailable'].includes(body.reason)) {
                 return res.status(status).json({ success: false, error: body });
             }
-            if (status === 422 && body && typeof body === 'object' &&
+            if (!timedOut && status === 422 && body && typeof body === 'object' &&
                 body.metadata && ['insufficient_candidates', 'missing_slot_candidates', 'insufficient_distinct_places',
                     'insufficient_unique_courses'].includes(body.metadata.reason)) {
                 return res.status(422).json({ success: false, error: body });
             }
-            const timedOut = ['ECONNABORTED', 'ETIMEDOUT'].includes(error.code);
             return res.status(timedOut ? 504 : 502).json({ success: false, error: {
                 error: timedOut ? '추천 서버 응답 시간이 초과되었습니다.' : '추천 서버에 연결하지 못했습니다.',
                 reason: timedOut ? 'upstream_timeout' : 'upstream_unavailable',
             } });
+        } finally {
+            upstream.dispose();
         }
     }
 
@@ -72,22 +80,30 @@ function createApp({ httpClient = axios, env = process.env } = {}) {
         }
         const key = (env.KAKAO_API_KEY || '').trim();
         if (!key) return res.json({ place_url: null, kakao_place_id: null, reason: 'map_not_configured' });
+        const upstream = upstreamRequest(req, res, KAKAO_TIMEOUT_MS);
         try {
+            if (!upstream.canRespond()) return;
             const match = await findPlace(httpClient, { name: name.trim(), address, lat: userLat, lng: userLng },
-                { Authorization: `KakaoAK ${key}` });
+                { Authorization: `KakaoAK ${key}` }, { signal: upstream.signal });
+            if (!upstream.canRespond()) return;
+            upstream.checkDeadline();
             return res.json({ place_url: match?.place_url ?? null, kakao_place_id: match?.id ?? null });
         } catch (error) {
-            const timedOut = ['ECONNABORTED', 'ETIMEDOUT'].includes(error.code);
+            if (!upstream.canRespond()) return;
+            const timedOut = upstream.timedOut || ['ECONNABORTED', 'ETIMEDOUT'].includes(error.code);
             return res.status(timedOut ? 504 : 502).json({
                 error: '지도 상세 정보를 조회하지 못했습니다.',
                 reason: timedOut ? 'upstream_timeout' : 'upstream_unavailable',
             });
+        } finally {
+            upstream.dispose();
         }
     });
 
     app.use((req, res) => res.status(404).json({ success: false,
         error: { error: '요청한 경로가 없습니다.', reason: 'invalid_request' } }));
     app.use((error, req, res, next) => {
+        if (res.destroyed || res.writableEnded) return;
         if (res.headersSent) return next(error);
         const status = error.type === 'entity.too.large' ? 413 : error.type === 'entity.parse.failed' ? 400 : 500;
         return res.status(status).json({ success: false, error: {

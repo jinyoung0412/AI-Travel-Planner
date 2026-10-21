@@ -5,24 +5,7 @@ const Map<String, LocationFix> _kRegionCenters = {
   '아산': LocationFix(36.7898, 127.0043),
 };
 
-const Map<String, List<_TransitHub>> _kTransitHubs = {
-  '천안': [
-    _TransitHub('천안역', 36.8082, 127.1506),
-    _TransitHub('봉명역', 36.8054, 127.1430),
-    _TransitHub('쌍용역', 36.8011, 127.1239),
-    _TransitHub('두정역', 36.8201, 127.1227),
-    _TransitHub('천안아산역 (KTX)', 36.7982, 127.1049),
-    _TransitHub('천안종합터미널', 36.8005, 127.1380),
-  ],
-  '아산': [
-    _TransitHub('온양온천역', 36.7892, 127.0039),
-    _TransitHub('신창역', 36.7700, 126.9830),
-    _TransitHub('탕정역', 36.7971, 127.0491),
-    _TransitHub('천안아산역 (KTX)', 36.7982, 127.1049),
-    _TransitHub('아산터미널', 36.7896, 127.0018),
-    _TransitHub('배방역', 36.7976, 127.0699),
-  ],
-};
+const _kTransitHubs = transitHubs;
 
 // Only the mood group permits more than one selected tag.
 const Set<String> _kSingleSelectGroups = {'누구와', '특별한 날', '실내 · 야외', '어떤 활동'};
@@ -93,8 +76,3 @@ const Map<String, List<String>> _kTagGroups = {
     '노래방/실내 오락',
   ],
 };
-
-class _TransitHub extends LocationFix {
-  final String name;
-  const _TransitHub(this.name, super.lat, super.lng);
-}

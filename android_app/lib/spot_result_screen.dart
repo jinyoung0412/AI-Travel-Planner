@@ -19,9 +19,7 @@ class SpotResultScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final evidenceBanner = metadata['preference_evidence'] == 'unavailable'
-        ? 1
-        : 0;
+    final evidenceBanner = PreferenceNotice.hasNotice(metadata) ? 1 : 0;
     return Scaffold(
       backgroundColor: const Color(0xFFFFF8F3),
       appBar: AppBar(

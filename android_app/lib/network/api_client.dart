@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
+import 'tag_suggestion_exception.dart';
 
 const defaultApiBaseUrl = String.fromEnvironment(
   'API_BASE_URL',
@@ -33,13 +34,27 @@ class ApiClient {
 
   void close() => _client.close();
 
-  Future<List<String>> suggestTags({required String userText}) async {
+  Future<List<String>> suggestTags({
+    required String userText,
+    bool throwOnError = false,
+  }) async {
     if (userText.trim().isEmpty) return [];
     final result = await post('/suggest/tags', {'user_text': userText});
-    if (result.containsKey('error')) return [];
+    if (result.containsKey('error')) {
+      // Legacy clients treat suggestions as optional. The interactive facade
+      // opts in to failures so it can distinguish an outage from zero tags.
+      if (!throwOnError) return [];
+      throw TagSuggestionException(
+        result['reason'] is String ? result['reason'] as String : 'unavailable',
+      );
+    }
     final data = result['data'] ?? result;
     final tags = data is Map ? data['tags'] : null;
-    return tags is List ? tags.whereType<String>().toSet().toList() : [];
+    if (tags is! List || tags.any((tag) => tag is! String)) {
+      if (!throwOnError) return [];
+      throw const TagSuggestionException('invalid_response');
+    }
+    return tags.cast<String>().toSet().toList();
   }
 
   Future<Map<String, dynamic>> getSpotRecommendation({

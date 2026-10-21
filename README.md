@@ -7,10 +7,10 @@
 - 스팟: 출발점 반경과 명시한 장소 종류를 지킨 후보를 점수화한 뒤 방문 순서로 정렬합니다.
 - 코스: 3·4·5개 슬롯의 순서와 종류, 반경, 장소 ID 중복 금지를 지켜 요청한 코스를 찾습니다. 코스 간 장소 재사용은 허용합니다.
 - 저장: 장소 ID와 이전 ID 별칭으로 스팟·코스를 식별하며, 코스는 순서도 구분합니다.
-- 지도: 이름·주소·좌표로 상세 페이지를 확인하고, 불확실하면 해당 장소 좌표 핀을 엽니다.
+- 지도: 이름·주소·좌표로 상세 페이지를 확인합니다. 상세 확인이 안 되면 좌표 품질상 허용된 장소만 참고 위치 안내에 동의한 뒤 좌표 핀을 엽니다. 차단된 좌표는 지도 핀과 코스 거리 숫자에 사용하지 않습니다.
 - **실제 DB는 13,745곳, 격리 태그 12,144건, 검증된 태그 장소 0곳입니다.** 현재 추천은 카테고리·리뷰 수·좌표 거리로 동작하며 검증된 취향 태그 신호는 없습니다. 격리 태그를 추천에 다시 사용하지 않습니다.
 - 직선거리 추정이며 실제 도로·대중교통 소요시간, 환승, 영업시간·현재 영업 상태는 확인하지 않습니다. 전역 최적 경로나 실제 방문을 보장하지 않습니다.
-- 실제 재수집·유료 모델·지도 API 검증과 모바일 실기기 검증은 별도 작업입니다. 고정 5곳 파일럿은 준비 상태이며 `collection_authorized_now=false`를 유지합니다. 실제 정확도는 미측정(분모 0)입니다.
+- 2026-10-21 기준 대표 Claude·지도 요청과 최신 debug APK의 Android 실기기 재검증을 수행했습니다. 추천·저장·오류 복구 및 지도 링크 수정의 확인 범위와 미검증 범위를 구분합니다. 실제 블로그 재수집·취향 정확도 검증은 수행하지 않았습니다. 고정 5곳 파일럿은 준비 상태이며 `collection_authorized_now=false`, 파일럿 실제 정확도 미측정(분모 0)을 유지합니다.
 
 ## 구성
 
@@ -53,11 +53,11 @@ Python 라이브러리는 `environment.yml`, Node와 Flutter의 정확한 의존
 | 변수 | 사용처 | 키가 없을 때 |
 |---|---|---|
 | `ANTHROPIC_API_KEY` | Flask 언어 해석·태그 제안 | 알려진 명시 종류는 오프라인 해석, 복합 문장 해석·태그 제안은 503, 취향 확장은 원래 태그로 대체 |
-| `KAKAO_API_KEY` | Node 장소 상세 조회·전처리 지오코딩 | 상세 조회 실패 시 앱은 좌표 핀 사용, 지오코딩은 실행 불가 |
+| `KAKAO_API_KEY` | Node 장소 상세 조회·전처리 지오코딩 | 상세 조회 실패 시 좌표 품질 확인·참고 위치 동의 후 핀 사용 가능, 지오코딩은 실행 불가 |
 | `NAVER_API_ID`, `NAVER_API_SECRET` | 블로그 검색 | 실제 수집 실행 불가 |
 | `TRAVEL_DATA_DIR` | 브라우저 수집 CSV 출력 | 기본 `Preprocess/data/chungnam_data` |
 
-앱의 기본 게이트웨이 주소는 Android 에뮬레이터용 `http://10.0.2.2:8080`입니다. `flutter run --dart-define=API_BASE_URL=http://<호스트>:8080`으로 다른 주소를 지정할 수 있습니다. LAN 개발에서는 Node의 `NODE_HOST`도 접근 가능한 인터페이스로 지정해야 합니다. 서버를 먼저 실행해야 합니다. Flutter 검증 대상은 Android 개발 앱입니다. debug/profile은 로컬 HTTP를 허용하며 release는 HTTPS endpoint가 필요합니다. 다른 플랫폼·실기기·native Gradle 빌드는 검증하지 않았습니다.
+앱의 기본 게이트웨이 주소는 Android 에뮬레이터용 `http://10.0.2.2:8080`입니다. `flutter run --dart-define=API_BASE_URL=http://<호스트>:8080`으로 다른 주소를 지정할 수 있습니다. LAN 개발에서는 Node의 `NODE_HOST`도 접근 가능한 인터페이스로 지정해야 합니다. 서버를 먼저 실행해야 합니다. Flutter 검증 대상은 Android 개발 앱입니다. debug/profile은 로컬 HTTP를 허용하며 release는 HTTPS endpoint가 필요합니다. Android debug APK 빌드·보존 설치와 추천·저장·지도·권한 오류 안내의 실기기 재검증을 수행했습니다. 실제 GPS fix·설치된 지도 앱 분기·다른 플랫폼과 release 배포는 검증하지 않았습니다.
 
 추가 설정은 `.env.example`의 주석에 기본값으로 제공합니다. 서버를 재시작해 적용합니다.
 
@@ -85,6 +85,10 @@ python scripts/check_offline.py --component gateway
 ```
 
 설치된 의존성을 사용합니다. 검사 과정에서 패키지를 내려받거나 실제 수집을 시작하지 않습니다. Python 전체 회귀, 알고리즘 smoke, 전처리 경로 검사, 실제 DB 읽기 전용 감사, 임시 DB 3회 재구축 보존 검사, Node 회귀·구문 검사, Flask→Node 실제 loopback HTTP smoke, Flutter 분석·테스트를 실행합니다. loopback 검사는 외부 HTTP·모델 호출을 차단하고 임시 로컬 포트를 열었다가 닫습니다. DB와 고정 파일럿의 검사 전후 SHA-256을 비교합니다. Python 테스트의 HTTP·모델 호출은 mock하거나 차단하며 Node·Flutter도 외부 HTTP를 mock합니다. 세부 검증 범위·결과는 [통합 메모](docs/refactor-integration.md)에 기록합니다.
+
+오프라인 시작 환경은 인증값·앱 설정·proxy·사용자 주입 옵션을 제거합니다. Dart 계약검사의 실행 파일은 `DART_BIN=/절대/경로/dart`로 지정할 수 있으며, 존재하는 실행 가능 파일만 전달합니다. 잘못 지정하면 시작 시 실패하고 조용히 skip하지 않습니다. 지정이 없으면 기존 package config/PATH 탐색을 사용하며 SDK나 package config가 없으면 두 Dart 계약검사는 skip합니다.
+
+Python은 dotenv 로딩·직접 파싱/reload와 requests/httpx·socket/DNS 경계를 설치합니다. Node preload는 설치된 `dotenv` 패키지의 CommonJS/ESM 이름·subpath·resolved 파일/realpath alias를 실행 전에 대체하고, callback/promise의 기본·새 Resolver 조회를 차단합니다. Node TCP와 숫자 주소 lookup은 `127.0.0.1`/`::1`만 허용합니다. 이 경계는 해당 런타임 API를 사용하는 회귀검사용이며 임의 파일 읽기·native addon·별도 실행 파일까지 통제하는 OS 격리로 해석하지 않습니다. Dart/Flutter 전송은 mock 검증입니다.
 
 개별 데이터 감사 결과는 `local_artifacts/real_db_validation.json`, `local_artifacts/review_fix_validation.json`에 남습니다. 후자의 검증된 2곳은 **임시 복사본에 주입한 모의 근거**이며 실제 수집 성과가 아닙니다. 검사 도중 생성한 임시 DB·백업은 정리합니다.
 
@@ -166,3 +170,7 @@ python Preprocess/RunPreprocess/blog_tag_pilot.py prepare
 | 김승진 | 크롤링·전처리 |
 | 송예성 | AI 알고리즘 유지보수·추가 기능 |
 | 홍성재, 최형우 | AI 알고리즘 유지보수 보조 |
+
+## 팀원 테스트
+
+[팀원용 QA 체크리스트](docs/team-qa-checklist.md)에 기본 사용 흐름, 추천 종류·순서·중복, 실제 장소 대조, 저장·지도·오류 복구 확인 방법과 결과 양식을 정리했습니다. 개별 기기 로그·스크린샷·로컬 작업 기록은 저장소에 포함하지 않습니다.

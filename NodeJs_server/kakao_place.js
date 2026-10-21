@@ -1,5 +1,7 @@
 // A Kakao search result is an external identity, not an authoritative match by
 // name alone. Require local coordinates plus address evidence when available.
+const KAKAO_TIMEOUT_MS = 10000;
+
 function normalize(value) {
     return String(value || '').trim().replace(/\s+/g, ' ').replace(/^충청남도(?= |$)/, '충남');
 }
@@ -42,20 +44,22 @@ function selectIdentityMatch(documents, { name, address, lat, lng }) {
     const matches = documents.filter(doc => {
         if (!doc || typeof doc !== 'object' || !/^https?:\/\/place\.map\.kakao\.com\/\d+$/.test(doc.place_url) || distanceM(lat, lng, doc) > 250) return false;
         const actualName = normalize(doc.place_name);
-        if (actualName !== query && !(expected && actualName.startsWith(query + ' '))) return false;
+        // A shared building/coordinate does not make a parking lot, annex or
+        // another branch the requested place. Keep branch names intact.
+        if (actualName !== query) return false;
         return !expected || [doc.road_address_name, doc.address_name].some(a => addressAnchor(a) === expected);
     });
     // Multiple matches are ambiguous: the Flutter client can open its own pin.
     return matches.length === 1 ? matches[0] : null;
 }
 
-async function findPlace(httpClient, input, headers) {
+async function findPlace(httpClient, input, headers, { signal } = {}) {
     const response = await httpClient.get('https://dapi.kakao.com/v2/local/search/keyword.json', {
         params: { query: input.name, x: input.lng, y: input.lat, radius: 1000, size: 15 }, headers,
-        timeout: 10000,
+        timeout: KAKAO_TIMEOUT_MS, signal,
     });
     const match = selectIdentityMatch(response.data?.documents, input);
     return match ? { ...match, place_url: match.place_url.replace(/^http:/, 'https:') } : null;
 }
 
-module.exports = { selectIdentityMatch, findPlace };
+module.exports = { selectIdentityMatch, findPlace, KAKAO_TIMEOUT_MS };

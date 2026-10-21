@@ -9,7 +9,6 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import urlparse, parse_qs
 
 import pandas as pd
 import requests
@@ -20,30 +19,21 @@ from tqdm import tqdm
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 from place_identity import ensure_ids, text, place_id as canonical_place_id
-from blog_evidence import address_evidence_excerpt, name_matches, provider_url_matches, tags_from_posts
+from blog_evidence import address_evidence_excerpt, name_matches, provider_url_matches, tags_from_posts, post_url_key
 
 from Preprocess.RunPreprocess.collection_state import (
     identity_snapshot, audit_matches_place, retryable_post, has_retryable_failures, archive_file,
 )
 from Preprocess.crawler.http_client import get as _get
-from Preprocess.crawler.storage import atomic_output
+from Preprocess.crawler.storage import atomic_output, exclusive_output
 INPUT_CSV = ROOT / 'Preprocess/data/processed/chungnam_places_filtered.csv'
 OUTPUT_CSV = ROOT / 'Preprocess/data/processed/blog_tags.csv'
 PAGE_HEADERS = {'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) Mobile Safari/604.1'}
 
 
 def canonical_blog_url(url):
-    parsed = urlparse(url)
-    if (parsed.scheme not in ('http', 'https') or parsed.username or parsed.password or
-            parsed.hostname not in ('blog.naver.com', 'm.blog.naver.com')):
-        return ''
-    parts = parsed.path.strip('/').split('/')
-    if parsed.path.lower() == '/postview.naver':
-        query = parse_qs(parsed.query)
-        parts = [query.get('blogId', [''])[0], query.get('logNo', [''])[0]]
-    if len(parts) != 2 or not re.fullmatch(r'[a-zA-Z0-9_-]+', parts[0]) or not parts[1].isdigit():
-        return ''
-    return f'https://blog.naver.com/{parts[0]}/{parts[1]}'
+    key = post_url_key(url)
+    return f'https://blog.naver.com/{key}' if key else ''
 
 
 def search_blog_urls(place, display=30, trace=None):
@@ -55,8 +45,12 @@ def search_blog_urls(place, display=30, trace=None):
         headers={'X-Naver-Client-Id': os.environ['NAVER_API_ID'],
                  'X-Naver-Client-Secret': os.environ['NAVER_API_SECRET']},
         params={'query': query, 'display': display, 'sort': 'sim'}, timeout=10)
-    items = response.json().get('items', [])
-    if not isinstance(items, list) or any(not isinstance(item, dict) for item in items):
+    payload = response.json()
+    if not isinstance(payload, dict) or 'items' not in payload:
+        raise ValueError('Unsupported search payload')
+    items = payload['items']
+    if not isinstance(items, list) or any(not isinstance(item, dict) or
+            not isinstance(item.get('link'), str) or not item['link'] for item in items):
         raise ValueError('Unsupported search payload')
     urls = [canonical_blog_url(item.get('link', '')) for item in items]
     urls = [url for url in urls if url]
@@ -272,6 +266,12 @@ def _resume_plan(checkpoint, place, retry_unverified, retry_failed):
 
 
 def main(input_path=INPUT_CSV, output_path=OUTPUT_CSV, limit=None, retry_unverified=False, status=None, retry_failed=False):
+    # One owner covers CSV read/merge, per-place journals, history and snapshots.
+    with exclusive_output(output_path):
+        return _main(input_path, output_path, limit, retry_unverified, status, retry_failed)
+
+
+def _main(input_path, output_path, limit, retry_unverified, status, retry_failed):
     load_dotenv(ROOT / '.env')
     if not os.getenv('NAVER_API_ID') or not os.getenv('NAVER_API_SECRET'):
         raise SystemExit('NAVER_API_ID / NAVER_API_SECRET가 필요합니다. 외부 호출은 수행하지 않았습니다.')
@@ -379,7 +379,9 @@ if __name__ == '__main__':
     parser.add_argument('--input', type=Path, default=INPUT_CSV)
     parser.add_argument('--output', type=Path, default=OUTPUT_CSV)
     parser.add_argument('--limit', type=int)
-    parser.add_argument('--test', action='store_true', help='실제 API 호출을 최대 5개로 제한')
+    parser.add_argument('--test', action='store_true', help=(
+        '장소 최대 5곳 수집(HTTP 5회 제한 아님). 장소당 최대 30개 글과 검색 각 최대 2회 시도; '
+        '한 실행의 HTTP 요청은 재시도 포함 최대 310회'))
     parser.add_argument('--retry-unverified', action='store_true')
     parser.add_argument('--retry-failed', action='store_true', help='고정 URL의 일시적 실패만 한 번 재시도; 정상 글은 다시 요청하지 않음')
     parser.add_argument('--status', choices=['ambiguous_legacy', 'legacy_unverified', 'needs_collection'])

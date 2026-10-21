@@ -140,7 +140,7 @@ class _CourseResultScreenState extends State<CourseResultScreen> {
                     Padding(
                       padding: const EdgeInsets.symmetric(vertical: 8),
                       child: Text(
-                        distanceNotice(_metric(index)),
+                        distanceNotice(_metric(index), places: _spots(index)),
                         style: TextStyle(
                           fontSize: 12,
                           color: Colors.grey.shade600,

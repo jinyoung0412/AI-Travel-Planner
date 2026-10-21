@@ -3,15 +3,17 @@ import os
 import shutil
 import hashlib
 import json
-from Preprocess.crawler.storage import atomic_output
+from Preprocess.crawler.storage import atomic_output, exclusive_output
 from pathlib import Path
 
 from place_identity import place_id, identity_key
+from place_quality import display_name, display_address
 
 DATA_DIR = Path(os.getenv('TRAVEL_DATA_DIR', Path(__file__).resolve().parents[1] / 'data/chungnam_data'))
 FIELDS = ['페이지', '순위', '가게명', '카테고리', '주소', '검색어', '방문자수', '블로그수', '영업시간',
           'place_id', 'identity_key', 'provider', 'provider_place_id',
-          'search_region', 'search_category', 'category_source']
+          'search_region', 'search_category', 'category_source',
+          'source_name', 'source_address', 'source_list_text', 'display_name', 'display_address']
 
 
 def get_csv_path(region, category):
@@ -25,9 +27,14 @@ def get_done_path(region, category):
 
 def is_task_completed(region, category):
     """Legacy DONE markers cannot prove that search/pagination succeeded."""
+    source = Path(get_csv_path(region, category))
+    with exclusive_output(source):
+        return _is_task_completed(region, category, source)
+
+
+def _is_task_completed(region, category, source):
     try:
         marker = json.loads(Path(get_done_path(region, category)).read_text(encoding='utf-8'))
-        source = Path(get_csv_path(region, category))
         return (marker.get('version') == 2 and marker.get('status') == 'completed' and
                 marker.get('region') == region and marker.get('category') == category and
                 marker.get('csv_sha256') == hashlib.sha256(source.read_bytes()).hexdigest())
@@ -37,13 +44,20 @@ def is_task_completed(region, category):
 
 def mark_task_completed(region, category):
     source = Path(get_csv_path(region, category))
-    marker = {'version': 2, 'status': 'completed', 'region': region, 'category': category,
-              'csv_sha256': hashlib.sha256(source.read_bytes()).hexdigest()}
-    with atomic_output(get_done_path(region, category)) as stream:
-        json.dump(marker, stream, ensure_ascii=False)
+    with exclusive_output(source):
+        marker = {'version': 2, 'status': 'completed', 'region': region, 'category': category,
+                  'csv_sha256': hashlib.sha256(source.read_bytes()).hexdigest()}
+        with atomic_output(get_done_path(region, category)) as stream:
+            json.dump(marker, stream, ensure_ascii=False)
 
 
 def touch_init_file(filepath):
+    with exclusive_output(filepath):
+        _touch_init_file(filepath)
+
+
+def _touch_init_file(filepath):
+    """Schema migration under the caller's exclusive CSV ownership."""
     path = Path(filepath)
     path.parent.mkdir(parents=True, exist_ok=True)
     rows, fields = [], FIELDS
@@ -89,13 +103,24 @@ def save_item(filepath, data):
     row['provider_place_id'] = data.get('provider_place_id', '')
     row['identity_key'] = identity_key(row)
     row['place_id'] = place_id(row)
-    touch_init_file(filepath)
-    with open(filepath, encoding='utf-8-sig', newline='') as stream:
-        reader = csv.DictReader(stream)
-        fields, rows = reader.fieldnames, list(reader)
-    with atomic_output(filepath, encoding='utf-8-sig') as stream:
-        writer = csv.DictWriter(stream, fieldnames=fields)
-        writer.writeheader()
-        writer.writerows(rows)
-        writer.writerow(row)
+    row.update(source_name=row['가게명'], source_address=row['주소'],
+               source_list_text=data.get('source_list_text', ''),
+               display_name=display_name(row['가게명'], row['카테고리']),
+               display_address=display_address(row['주소']))
+    with exclusive_output(filepath):
+        _touch_init_file(filepath)
+        with open(filepath, encoding='utf-8-sig', newline='') as stream:
+            reader = csv.DictReader(stream)
+            fields, rows = reader.fieldnames, list(reader)
+        for previous in rows:
+            try:
+                if place_id(previous) == row['place_id']:
+                    return row['place_id']
+            except ValueError:
+                continue  # Incomplete legacy rows stay in the CSV.
+        with atomic_output(filepath, encoding='utf-8-sig') as stream:
+            writer = csv.DictWriter(stream, fieldnames=fields)
+            writer.writeheader()
+            writer.writerows(rows)
+            writer.writerow(row)
     return row['place_id']

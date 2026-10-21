@@ -1,5 +1,4 @@
 """Raw crawler CSVs -> identity-preserving, resumable address geocoding."""
-import math
 import json
 import hashlib
 import os
@@ -15,6 +14,8 @@ from tqdm import tqdm
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 from place_identity import ensure_ids, text
+from place_quality import (specific_address, display_name, display_address,
+                           coordinate_pair, coordinates_match_identity, geocode_address_matches)
 from Preprocess.RunPreprocess.build_database import merge_verified_tags, _audit_frame, _read_csv
 from Preprocess.crawler.categories import CATEGORIES
 from Preprocess.crawler.http_client import get as _get
@@ -43,14 +44,23 @@ EXCLUDE_CATEGORIES = {
 
 def get_coords(address, api_key):
     """Address geocoding only, never a measured travel distance/time."""
+    if not specific_address(address):
+        return None, None  # A locality centroid cannot stand in for a place.
     try:
         response = _get('https://dapi.kakao.com/v2/local/search/address.json', kind='geocode',
-                        headers={'Authorization': f'KakaoAK {api_key}'}, params={'query': address}, timeout=10)
+                        headers={'Authorization': f'KakaoAK {api_key}'},
+                        params={'query': display_address(address)}, timeout=10)
         docs = response.json().get('documents', [])
-        if docs:
-            lat, lng = float(docs[0]['y']), float(docs[0]['x'])
-            if math.isfinite(lat) and math.isfinite(lng) and -90 <= lat <= 90 and -180 <= lng <= 180:
-                return lat, lng
+        if not isinstance(docs, list):
+            return None, None
+        matches = set()
+        for doc in docs:
+            if geocode_address_matches(address, doc):
+                pair = coordinate_pair({'lat': doc.get('y'), 'lng': doc.get('x')})
+                if pair:
+                    matches.add(pair)
+        if len(matches) == 1:
+            return next(iter(matches))
     except (requests.RequestException, ValueError, TypeError, KeyError, AttributeError, IndexError):
         return None, None
     return None, None
@@ -94,11 +104,17 @@ def read_sources(input_dir):
 
 
 def valid_coords(row):
-    try:
-        lat, lng = float(row['latitude']), float(row['longitude'])
-        return math.isfinite(lat) and math.isfinite(lng) and -90 <= lat <= 90 and -180 <= lng <= 180
-    except (KeyError, TypeError, ValueError):
-        return False
+    return coordinates_match_identity(row)
+
+
+def restore_coordinates(frame, index, cached):
+    row = frame.loc[index]
+    if (cached.get('identity_key') != row['identity_key'] or
+            not coordinates_match_identity(cached, row['identity_key'])):
+        return
+    frame.loc[index, ['latitude', 'longitude']] = coordinate_pair(cached)
+    frame.loc[index, 'coordinate_identity_key'] = row['identity_key']
+    frame.loc[index, 'coordinate_source'] = text(cached.get('coordinate_source')) or 'legacy_unknown'
 
 
 def save_frame(path, frame):
@@ -132,6 +148,14 @@ def run_pipeline(input_dir=None, output_dir=None, api_key=None):
             audit = pd.concat([_read_csv(audit_path), audit], ignore_index=True)
         save_frame(audit_path, audit.drop_duplicates())
     frame['collection_sources'] = frame['place_id'].map(sources)
+    unsafe_address = ~frame['주소'].map(specific_address)
+    held = frame[unsafe_address].copy()
+    held['preprocess_error'] = 'address_not_specific'
+    rejected = pd.concat([rejected, held], ignore_index=True)
+    frame = frame[~unsafe_address].copy()
+    # Derived display values never feed ensure_ids, aliases or blog evidence.
+    frame['display_name'] = [display_name(r['가게명'], r.get('카테고리')) for r in frame.to_dict('records')]
+    frame['display_address'] = frame['주소'].map(display_address)
     if '카테고리' in frame:
         frame = frame[~frame['카테고리'].isin(EXCLUDE_CATEGORIES)]
     frame = frame.reset_index(drop=True)
@@ -144,8 +168,7 @@ def run_pipeline(input_dir=None, output_dir=None, api_key=None):
         for index, row in frame.iterrows():
             if not valid_coords(row) and row['place_id'] in previous.index:
                 cached = previous.loc[row['place_id']]
-                if cached['identity_key'] == row['identity_key'] and valid_coords(cached):
-                    frame.loc[index, ['latitude', 'longitude']] = cached[['latitude', 'longitude']].to_numpy()
+                restore_coordinates(frame, index, cached)
     pending = [i for i, row in frame.iterrows() if not valid_coords(row)]
     # Read historical CSV checkpoints; new per-place journals avoid rewriting the dataset per request.
     checkpoint = output_dir / 'geocoding_checkpoint.csv'
@@ -155,16 +178,14 @@ def run_pipeline(input_dir=None, output_dir=None, api_key=None):
         for index in pending:
             row = frame.loc[index]
             cached = cached_rows.get(row['place_id'], {})
-            if cached.get('identity_key') == row['identity_key'] and valid_coords(cached):
-                frame.loc[index, ['latitude', 'longitude']] = [cached['latitude'], cached['longitude']]
+            restore_coordinates(frame, index, cached)
     journal = output_dir / 'geocoding_checkpoint'
     for index in pending:
         row = frame.loc[index]
         record_path = journal / (hashlib.sha256(row['place_id'].encode()).hexdigest() + '.json')
         if record_path.exists():
             cached = json.loads(record_path.read_text(encoding='utf-8'))
-            if cached.get('identity_key') == row['identity_key'] and valid_coords(cached):
-                frame.loc[index, ['latitude', 'longitude']] = [cached['latitude'], cached['longitude']]
+            restore_coordinates(frame, index, cached)
     pending = [i for i, row in frame.iterrows() if not valid_coords(row)]
     if pending and not api_key:
         load_dotenv(ROOT / '.env')
@@ -173,10 +194,13 @@ def run_pipeline(input_dir=None, output_dir=None, api_key=None):
         raise ValueError('KAKAO_API_KEY가 존재하지 않습니다. 외부 호출은 수행하지 않았습니다.')
     for index in tqdm(pending, desc='주소 지오코딩'):
         frame.loc[index, ['latitude', 'longitude']] = get_coords(text(frame.loc[index, '주소']), api_key)
+        frame.loc[index, 'coordinate_source'] = 'address_geocode'
+        frame.loc[index, 'coordinate_identity_key'] = frame.loc[index, 'identity_key']
         row = frame.loc[index]
         record_path = journal / (hashlib.sha256(row['place_id'].encode()).hexdigest() + '.json')
         with atomic_output(record_path) as stream:
-            json.dump({key: row[key] for key in ('place_id', 'identity_key', 'latitude', 'longitude')}, stream)
+            json.dump({key: row[key] for key in ('place_id', 'identity_key', 'latitude', 'longitude',
+                                               'coordinate_identity_key', 'coordinate_source')}, stream)
         time.sleep(0.02)
     save_frame(checkpoint, frame)
     valid = pd.Series([valid_coords(row) for _, row in frame.iterrows()], index=frame.index, dtype=bool)

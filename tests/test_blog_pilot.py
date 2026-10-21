@@ -12,9 +12,10 @@ from Preprocess.RunPreprocess.build_database import merge_verified_tags, write_d
 
 @pytest.fixture
 def prepared(tmp_path, places):
-    source = ensure_ids(places.head(5))
+    # Name the synthetic places before binding their synthetic coordinates.
+    source = places.head(5).copy()
     source.loc[:1, '가게명'] = '동명카페'
-    source = ensure_ids(source.drop(columns=['place_id', 'identity_key']))
+    source = ensure_ids(source)
     frame, _ = merge_verified_tags(source, pd.DataFrame())
     db = tmp_path / 'places.db'
     write_database(frame, db, pd.DataFrame([{'source_record': '{"legacy":1}', 'quarantine_reason': 'legacy'}]))
