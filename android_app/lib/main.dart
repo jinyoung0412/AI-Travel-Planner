@@ -40,7 +40,10 @@ class _RootScreenState extends State<RootScreen> {
       backgroundColor: const Color(0xFFFFF8F3),
       body: IndexedStack(
         index: _tab,
-        children: [const HomeScreen(), SavedScreen(key: _savedKey)],
+        children: [
+          const HomeScreen(),
+          SavedScreen(key: _savedKey),
+        ],
       ),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _tab,
@@ -51,12 +54,21 @@ class _RootScreenState extends State<RootScreen> {
         backgroundColor: Colors.white,
         selectedItemColor: const Color(0xFFFF7043),
         unselectedItemColor: Colors.grey.shade400,
-        selectedLabelStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
+        selectedLabelStyle: const TextStyle(
+          fontWeight: FontWeight.w600,
+          fontSize: 12,
+        ),
         unselectedLabelStyle: const TextStyle(fontSize: 12),
         elevation: 12,
         items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.explore_rounded), label: '추천'),
-          BottomNavigationBarItem(icon: Icon(Icons.bookmark_rounded), label: '저장'),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.explore_rounded),
+            label: '추천',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.bookmark_rounded),
+            label: '저장',
+          ),
         ],
       ),
     );
@@ -69,7 +81,7 @@ class HomeScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SafeArea(
-      child: Padding(
+      child: SingleChildScrollView(
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -139,53 +151,57 @@ class _ModeCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () => Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => InputScreen(mode: mode)),
-      ),
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(24),
-        decoration: BoxDecoration(
-          color: color,
-          borderRadius: BorderRadius.circular(20),
-          boxShadow: [
-            BoxShadow(
-              color: color.withValues(alpha: 0.35),
-              blurRadius: 16,
-              offset: const Offset(0, 6),
-            ),
-          ],
+    return Semantics(
+      button: true,
+      label: title,
+      child: InkWell(
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => InputScreen(mode: mode)),
         ),
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: const TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    subtitle,
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: Colors.white.withValues(alpha: 0.85),
-                      height: 1.5,
-                    ),
-                  ),
-                ],
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: [
+              BoxShadow(
+                color: color.withValues(alpha: 0.35),
+                blurRadius: 16,
+                offset: const Offset(0, 6),
               ),
-            ),
-            Icon(icon, size: 52, color: Colors.white.withValues(alpha: 0.85)),
-          ],
+            ],
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      subtitle,
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: Colors.white.withValues(alpha: 0.85),
+                        height: 1.5,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(icon, size: 52, color: Colors.white.withValues(alpha: 0.85)),
+            ],
+          ),
         ),
       ),
     );

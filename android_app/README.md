@@ -1,16 +1,18 @@
-# ai_travel_app
+# 오늘 충남 Flutter 앱
 
-A new Flutter project.
+설정·서버 실행·추천 정책은 [저장소 루트 README](../README.md)를 참조하세요. `lib/api_service.dart`의 기본 주소는 Android 에뮬레이터용 `http://10.0.2.2:8080`입니다. `--dart-define=API_BASE_URL=http://<개발 PC>:8080`으로 주소를 지정합니다. Android debug/profile만 로컬 HTTP를 허용하며 release는 HTTPS endpoint가 필요합니다.
 
-## Getting Started
+```bash
+flutter pub get --offline
+flutter analyze --no-pub
+flutter test --no-pub
+flutter run
+```
 
-This project is a starting point for a Flutter application.
+장소 응답의 `place_id`, `identity_key`, 과거 별칭·공급자 충돌 이력, 이름, 주소, 좌표를 저장합니다. 장소 저장·삭제는 ID 기준이고 코스는 순서 있는 장소 ID 목록으로 구분하고 거리 추정·metadata도 보존합니다. 동명 지점은 별개로 저장됩니다.
 
-A few resources to get you started if this is your first Flutter project:
+기존 `saved_spots`와 `saved_courses` SharedPreferences 키를 그대로 사용합니다. 최초 조회에서 v2로 이행하며 원문은 각 키의 `_legacy_backup`에 한 번 보존합니다. 기존 주소가 있으면 이름+주소, 주소가 생략된 코스이면 이름+좌표 소수점 6자리로 새 응답과 비교합니다. ID/주소/좌표가 모두 없는 legacy 항목은 별도 unresolved ID로 보존하고 이름만으로 신규 지점에 자동 연결하지 않습니다. 주소 변경 뒤에도 서버의 과거 로컬 별칭을 사용하며, 충돌한 별칭이나 서로 다른 공급자 ID는 자동 연결하지 않습니다. 서버와 클라이언트의 ID 정규화·별칭 규칙을 공유 fixture로 비교합니다.
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+코스 화면의 거리는 출발점부터 슬롯 순서대로 합산한 직선거리 추정입니다. 교통 경로시간과 영업시간 자료가 없어 분 단위 이동시간을 표시하지 않습니다. 검증된 취향 태그가 없으면 결과·저장 코스에 근거 부재를 안내합니다. Kakao 상세 확인이 안 되면 좌표 품질상 허용된 장소만 참고 위치 동의 후 핀을 엽니다. 서버가 차단한 좌표는 핀을 열지 않으며 해당 코스 거리 숫자도 숨깁니다. 품질 필드가 없는 기존 저장 데이터도 검증된 좌표로 간주하지 않습니다.
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+현재 검증 대상은 Android 개발 앱입니다. 2026-10-21 기준 전체 Flutter 테스트 125개와 정적 분석을 통과했고, 최신 debug APK 보존 설치 후 추천·저장·지도·권한 오류 안내를 실기기에서 재검증했습니다. 좌표 웹 링크는 장소명을 포함하지 않는 공식 형식을 사용해 이름의 쉼표·특수문자에 따른 목적지 유실을 방지합니다. 실제 좌표의 현장 정확도를 보장하는 것은 아닙니다. 실제 GPS fix·설치된 지도 앱 분기·다른 플랫폼은 미검증입니다. 검증된 블로그 취향 태그는 0건이며 취향 정확도 검증을 완료한 상태가 아닙니다. 팀원 검증은 [QA 체크리스트](../docs/team-qa-checklist.md)를 사용하세요.
