@@ -22,7 +22,9 @@ from category_policy import (category_matches, normalize_filters, ALIASES, NEGAT
                              FOOD_BEVERAGE_CATS as _FOOD_CAFE_CATS, GENERIC_FOOD_TERMS,
                              concrete_food_terms, directly_excluded, landmark_suffix,
                              SPATIAL_RELATION)
-from recommender.visits import distinct_visits
+from recommender.diversity import BRAND_SOURCE_NAMES, select_diverse_spots
+from recommender.constants import INDOOR_ACTIVITY_CATS
+from recommendation_review import filter_reviewed_candidates
 
 load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
 
@@ -57,6 +59,7 @@ def _category_mentions(user_text):
     known = _known_categories()
     mentions = [(c, m.start(), m.end()) for c in sorted(known | ALIASES.keys())
                 for m in re.finditer(re.escape(c), user_text)
+                if not (c == '맥주' and re.match(r'\s*(?:박물관|전시|양조장|공장)', user_text[m.end():]))
                 if c != '산' or (m.start() == 0 or user_text[m.start()-1].isspace())
                 and (m.end() == len(user_text) or user_text[m.end()].isspace())]
     # Resolve overlaps per occurrence: a separate "카페" before "키즈카페"
@@ -149,7 +152,7 @@ _TAG_CATEGORY_MAP = {
     '스포츠/레저':    ['스포츠', '레저', '수영', '볼링', '클라이밍', '체육', '경기장', '골프', '테니스'],
     '체험 공방':      ['체험', '공방'],
     '전통/한옥':      ['한옥', '전통', '문화재'],
-    '노래방/실내 오락': ['노래방', '볼링', '오락'],
+    '노래방/실내 오락': INDOOR_ACTIVITY_CATS,
 }
 
 
@@ -192,7 +195,10 @@ def filter_keywords(df, category_filters, blog_tag_keywords):
     effective = category.where(category.str.strip().ne(''), fallback)
     if not category_filters:
         return df[~effective.map(lambda c: category_matches(c, ['주택전시관'])).astype(bool)].copy()
-    return df[effective.map(lambda c: category_matches(c, category_filters)).astype(bool)].copy()
+    names = df.get('가게명', pd.Series('', index=df.index)).fillna('')
+    matched = pd.Series([category_matches(c, category_filters, name)
+                        for c, name in zip(effective, names)], index=df.index, dtype=bool)
+    return df[matched].copy()
 
 
 def filter_excluded_categories(df, excluded):
@@ -257,14 +263,26 @@ def _preference_keywords(df, data):
             if verified.any() else [])
 
 
-def _preference_metadata(df, persona_tags):
+def _preference_metadata(df, persona_tags, category_tags=()):
     verified = df.get('blog_tag_status', pd.Series('', index=df.index)).eq('verified')
     count = int(verified.sum())
     return {'verified_tag_candidate_count': count,
             'preference_evidence': 'verified_tags_available' if count else 'unavailable',
             'preference_requested': bool(persona_tags),
+            'category_preference_tags_applied': list(category_tags),
             'preference_limitation': (None if count else
-                '검증된 블로그 태그가 없어 취향 일치 근거가 없습니다. 카테고리·인기도·거리로 추천합니다.')}
+                (f'활동 태그({", ".join(category_tags)})는 장소 종류에 반영했습니다. ' if category_tags else '') +
+                '검증된 블로그 태그가 없어 동행·분위기를 포함한 취향 일치 근거는 없습니다. '
+                '장소 종류·인기도·거리로 추천합니다.')}
+
+
+def _requested_brand_families(text):
+    # A positive named-brand search may intentionally want multiple branches.
+    # Negation or landmark searches are ambiguous and retain the variety policy.
+    if re.search(NEGATION, text) or re.search(SPATIAL_RELATION, text):
+        return []
+    return [family for family in BRAND_SOURCE_NAMES
+            if re.search(r'(?<![가-힣a-zA-Z0-9])' + re.escape(family), text)]
 
 
 def _area_error(data):
@@ -290,22 +308,29 @@ def recommend_spot():
         # Explicit kinds always take precedence over persona category hints.
         cats = explicit or derive_category_from_tags(data['persona_tags'])
         excluded = excluded_categories(data['user_text'])
-        df, quality = filter_coordinate_candidates(get_df(data['region']))
+        df, identity_review = filter_reviewed_candidates(get_df(data['region']))
+        df, quality = filter_coordinate_candidates(df)
         df = filter_radius(df, data['user_lat'], data['user_lng'], data['transport'])
         if not cats:
             df = df[~df['카테고리'].map(lambda c: category_matches(c, _FOOD_CAFE_CATS)).astype(bool)]
         df = filter_keywords(df, cats, [])
         df = filter_excluded_categories(df, excluded)
         tags = _preference_keywords(df, data)
-        preference = _preference_metadata(df, data['persona_tags'])
+        category_tags = ([tag for tag in data['persona_tags'] if tag in _TAG_CATEGORY_MAP]
+                         if not explicit else [])
+        preference = _preference_metadata(df, data['persona_tags'], category_tags)
         df = add_scores(df, tags)
         ranked = df.sort_values(['score', 'origin_distance_km', 'place_id'], ascending=[False, True, True])
-        top = distinct_visits(ranked).head(data['count']).to_dict('records')
+        selected, diversity = select_diverse_spots(ranked, data['count'],
+                                                  _requested_brand_families(data['user_text']))
+        top = selected.to_dict('records')
         route = greedy_tsp(top, (data['user_lat'], data['user_lng']))
         metadata = dict(requested_count=data['count'], returned_count=len(route),
                         category_filters=cats, constraints_relaxed=[], **preference,
                         excluded_category_filters=excluded,
+                        diversity=diversity,
                         candidate_quality=quality,
+                        identity_review=identity_review,
                         spatial_relation_limitation=('주변 장소와의 거리는 적용하지 않았습니다. 출발 위치 반경 안에서 요청한 종류를 추천합니다.'
                             if re.search(SPATIAL_RELATION, data['user_text']) else None),
                         reason=None if len(route) == data['count'] else 'insufficient_candidates')
@@ -326,7 +351,8 @@ def recommend_course():
     if _area_error(data):
         return jsonify(error='서비스 지역(천안·아산)을 벗어난 위치입니다.', reason='outside_service_area'), 422
     try:
-        df, quality = filter_coordinate_candidates(get_df(data['region']))
+        df, identity_review = filter_reviewed_candidates(get_df(data['region']))
+        df, quality = filter_coordinate_candidates(df)
         df = filter_radius(df, data['user_lat'], data['user_lng'], data['transport'])
         cats = ([SLOT_CATEGORY_MAP[s] for s in data['slot_types']] if data['slot_types']
                 else fixed_categories(data['spot_count']))
@@ -340,6 +366,7 @@ def recommend_course():
                         slot_types=data['slot_types'], radius_km=RADIUS_KM[data['transport']],
                         distance_method='coordinate_great_circle',
                         candidate_quality=quality,
+                        identity_review=identity_review,
                         limitation='좌표 기반 직선거리 추정입니다. 장소와 좌표의 실제 일치·도로·대중교통 경로시간·영업시간은 확인되지 않았습니다.')
         metrics = [route_metrics(c, start) for c in courses]
         if not courses:

@@ -71,3 +71,52 @@ test('API-01: arbitrary facility and branch suffixes cannot establish identity',
     assert.equal(selectIdentityMatch([{ ...doc, place_name: '아지트 아산점' }],
         { ...input, name: '아지트 천안점' }), null);
 });
+
+for (const [source, provider] of [
+    ['뚜쥬루과자점 거북이점', '뚜쥬루 거북이점'],
+    ['뚜쥬루갤러리아백화점센터시티점', '뚜쥬루 갤러리아점'],
+    ['뚜쥬루과자점 성정점', '뚜쥬루 성정점'],
+    ['뚜쥬루 빵돌가마마을', '뚜쥬루 빵돌가마점'],
+]) {
+    test(`branch spelling alias retains address/distance identity: ${source}`, async () => {
+        const expected = { ...input, name: source };
+        const actual = { ...doc, place_name: provider, category_name: '음식점 > 간식 > 제과,베이커리' };
+        assert.equal(selectIdentityMatch([actual], expected).id, '1');
+        assert.equal(selectIdentityMatch([{ ...actual, road_address_name: '충남 천안시 테스트로 2' }], expected), null);
+        assert.equal(selectIdentityMatch([{ ...actual, x: '127.2' }], expected), null);
+        assert.equal(selectIdentityMatch([actual], { ...expected, address: '' }), null);
+        assert.equal(selectIdentityMatch([{ ...actual, category_name: '교통,수송 > 전기차 충전소' }], expected), null);
+        assert.equal(selectIdentityMatch([{ ...actual, place_name: provider + ' 전기차충전소' }], expected), null);
+        assert.equal(selectIdentityMatch([actual, { ...actual, id: '2' }], expected), null);
+        let calls = 0;
+        const matched = await findPlace({ get: async (_url, options) => {
+            calls++;
+            assert.equal(options.params.query, provider);
+            return { data: { documents: [actual] } };
+        } }, expected, {});
+        assert.equal(matched.id, '1');
+        assert.equal(calls, 1);
+    });
+}
+
+test('brand aliases never equate different branches at the same address', () => {
+    const expected = { ...input, name: '뚜쥬루과자점 성정점' };
+    for (const name of ['뚜쥬루 거북이점', '뚜쥬루 어린이베이커리', '뚜쥬루 성정점 별관']) {
+        assert.equal(selectIdentityMatch([{ ...doc, place_name: name,
+            category_name: '음식점 > 제과,베이커리' }], expected), null);
+    }
+});
+
+test('provider name spacing is allowed only with complete matching identity evidence', () => {
+    const expected = { ...input, name: '랜드마크195', address: '충남 천안시 동남구 유량로 195 랜드마크195' };
+    const actual = { ...doc, place_name: '랜드마크 195', road_address_name: '충남 천안시 동남구 유량로 195' };
+    assert.equal(selectIdentityMatch([actual], expected).id, '1');
+    assert.equal(selectIdentityMatch([actual], { ...expected, address: '' }), null);
+    assert.equal(selectIdentityMatch([actual], { ...expected, address: '천안시 동남구' }), null);
+    assert.equal(selectIdentityMatch([{ ...actual, road_address_name: '충남 천안시 동남구 유량로 196' }], expected), null);
+    assert.equal(selectIdentityMatch([{ ...actual, x: '127.2' }], expected), null);
+    assert.equal(selectIdentityMatch([{ ...actual, place_name: '랜드마크 195 별관' }], expected), null);
+    assert.equal(selectIdentityMatch([{ ...actual, place_name: '랜드마크 195 전기차충전소' }], expected), null);
+    assert.equal(selectIdentityMatch([actual, { ...actual, id: '2' }], expected), null);
+    assert.equal(selectIdentityMatch([{ ...actual, place_name: '랜드마크 195 아산점' }], expected), null);
+});

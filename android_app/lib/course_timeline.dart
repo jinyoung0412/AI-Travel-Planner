@@ -121,7 +121,7 @@ class _TimelineStop extends StatelessWidget {
                     style: TextStyle(fontSize: 13, color: Colors.grey.shade500),
                   ),
                   const SizedBox(height: 10),
-                  PlaceMapButton(place: place),
+                  PlaceMapButton(place: place, lookupDetail: true),
                 ],
               ),
             ),

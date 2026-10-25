@@ -7,6 +7,9 @@ import 'travel_data.dart';
 
 typedef PlaceDetailLookup = Future<String?> Function(PlaceData place);
 
+bool _isKakaoDetailUrl(String url) =>
+    RegExp(r'^https?://place\.map\.kakao\.com/\d+$').hasMatch(url);
+
 Future<String?> _lookupDetail(PlaceData place) => ApiService.getKakaoPlaceUrl(
   name: place.name,
   lat: place.lat!,
@@ -171,19 +174,23 @@ Future<void> openPlaceMap(
     final lat = place.lat;
     final lng = place.lng;
     var detail = place.kakaoUrl;
-    if (lookupDetail && lat != null && lng != null) {
+    // A saved Kakao identity is already a concrete destination. Do not replace
+    // it with an empty/failed lookup or delay opening it on network access.
+    if (!_isKakaoDetailUrl(detail) &&
+        lookupDetail &&
+        lat != null &&
+        lng != null) {
       try {
-        detail =
-            await (detailLookup ?? _lookupDetail)(
-              place,
-            ).timeout(const Duration(seconds: 36)) ??
-            '';
+        final resolved = await (detailLookup ?? _lookupDetail)(
+          place,
+        ).timeout(const Duration(seconds: 36));
+        if (resolved != null && _isKakaoDetailUrl(resolved)) detail = resolved;
       } catch (_) {
-        detail = '';
+        // The coordinate fallback below still requires consent and eligibility.
       }
     }
     if (!context.mounted || !opening.canContinue) return;
-    if (RegExp(r'^https?://place\.map\.kakao\.com/\d+$').hasMatch(detail)) {
+    if (_isKakaoDetailUrl(detail)) {
       final uri = Uri.parse(detail.replaceFirst(RegExp(r'^http:'), 'https:'));
       launched = await opening.launch(uri);
       if (launched) return;

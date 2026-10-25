@@ -64,7 +64,7 @@ class SavedScreenState extends State<SavedScreen>
     if (_mapOpening) return;
     _mapOpening = true;
     try {
-      await openPlaceMap(context, place);
+      await openPlaceMap(context, place, lookupDetail: true);
     } finally {
       _mapOpening = false;
     }

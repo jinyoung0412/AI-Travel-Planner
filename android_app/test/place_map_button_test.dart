@@ -421,6 +421,39 @@ void main() {
   );
 
   testWidgets(
+    'stored detail has priority without a lookup even when coordinates are blocked',
+    (tester) async {
+      var lookups = 0;
+      final place = {
+        'name': '기존 저장 장소',
+        'lat': 36.8,
+        'lng': 127.1,
+        'kakao_url': 'http://place.map.kakao.com/123',
+        'coordinate_quality': {
+          'status': 'blocked',
+          'map_coordinate_eligible': false,
+        },
+      };
+      final original = jsonEncode(place);
+      await mount(
+        tester,
+        place: place,
+        lookup: (_) async {
+          lookups++;
+          throw StateError('the saved destination must not need a network');
+        },
+      );
+      await tester.tap(find.byType(TextButton));
+      await tester.pumpAndSettle();
+      expect(lookups, 0);
+      expect(calls, hasLength(1));
+      expect(url(calls.single), 'https://place.map.kakao.com/123');
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(jsonEncode(place), original);
+    },
+  );
+
+  testWidgets(
     'server blocked coordinate quality stops pin launch and leaves retry enabled',
     (tester) async {
       await mount(
