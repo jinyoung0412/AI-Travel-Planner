@@ -1,73 +1,126 @@
 import csv
 import os
+import shutil
+import hashlib
+import json
+from Preprocess.crawler.storage import atomic_output, exclusive_output
+from pathlib import Path
+
+from place_identity import place_id, identity_key
+from place_quality import display_name, display_address
+
+DATA_DIR = Path(os.getenv('TRAVEL_DATA_DIR', Path(__file__).resolve().parents[1] / 'data/chungnam_data'))
+FIELDS = ['페이지', '순위', '가게명', '카테고리', '주소', '검색어', '방문자수', '블로그수', '영업시간',
+          'place_id', 'identity_key', 'provider', 'provider_place_id',
+          'search_region', 'search_category', 'category_source',
+          'source_name', 'source_address', 'source_list_text', 'display_name', 'display_address']
+
 
 def get_csv_path(region, category):
-    folder = r"C:\AI-Travel-Planner\Preprocess\data\chungnam_data"
-    if not os.path.exists(folder):
-        os.makedirs(folder)
-    clean_reg = region.replace(" ", "_")
-    clean_cat = category.replace(" ", "_")
-    return f"{folder}/충남_{clean_reg}_{clean_cat}.csv"
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    return str(DATA_DIR / f'충남_{region.replace(" ", "_")}_{category.replace(" ", "_")}.csv')
+
 
 def get_done_path(region, category):
-    folder = r"C:\AI-Travel-Planner\Preprocess\data\chungnam_data"
-    clean_reg = region.replace(" ", "_")
-    clean_cat = category.replace(" ", "_")
-    return f"{folder}/충남_{clean_reg}_{clean_cat}.done"
+    return str(Path(get_csv_path(region, category)).with_suffix('.done'))
+
 
 def is_task_completed(region, category):
-    return os.path.exists(get_done_path(region, category))
+    """Legacy DONE markers cannot prove that search/pagination succeeded."""
+    source = Path(get_csv_path(region, category))
+    with exclusive_output(source):
+        return _is_task_completed(region, category, source)
+
+
+def _is_task_completed(region, category, source):
+    try:
+        marker = json.loads(Path(get_done_path(region, category)).read_text(encoding='utf-8'))
+        return (marker.get('version') == 2 and marker.get('status') == 'completed' and
+                marker.get('region') == region and marker.get('category') == category and
+                marker.get('csv_sha256') == hashlib.sha256(source.read_bytes()).hexdigest())
+    except (OSError, ValueError, AttributeError):
+        return False
+
 
 def mark_task_completed(region, category):
-    with open(get_done_path(region, category), "w", encoding="utf-8") as f:
-        f.write("DONE")
+    source = Path(get_csv_path(region, category))
+    with exclusive_output(source):
+        marker = {'version': 2, 'status': 'completed', 'region': region, 'category': category,
+                  'csv_sha256': hashlib.sha256(source.read_bytes()).hexdigest()}
+        with atomic_output(get_done_path(region, category)) as stream:
+            json.dump(marker, stream, ensure_ascii=False)
+
 
 def touch_init_file(filepath):
-    """
-    CSV 파일이 없을 경우에만 헤더 행을 포함한 빈 파일을 생성한다.
-    이미 파일이 존재하면 아무 동작도 하지 않아, 기존 데이터를 보존한다.
-    - utf-8-sig: BOM 포함 인코딩으로 Excel에서 한글이 깨지지 않도록 처리
-    - newline="": Windows 환경에서 빈 줄이 한 줄씩 추가되는 현상 방지
-    """
-    if not os.path.exists(filepath):
-        with open(filepath, "w", encoding="utf-8-sig", newline="") as f:
-            writer = csv.writer(f)
-            writer.writerow([
-                "페이지", "순위", "가게명", "카테고리",
-                "주소", "검색어", "방문자수", "블로그수", "영업시간"
-            ])
+    with exclusive_output(filepath):
+        _touch_init_file(filepath)
 
-def load_existing_names(filepath):
-    """
-    기존 CSV에 이미 저장된 가게명 목록을 읽어와 집합(set)으로 반환한다.
-    크롤링 도중 중단 후 재시작 시, 중복 수집을 방지하기 위한 용도.
-    """
+
+def _touch_init_file(filepath):
+    """Schema migration under the caller's exclusive CSV ownership."""
+    path = Path(filepath)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    rows, fields = [], FIELDS
+    if path.exists():
+        with path.open(encoding='utf-8-sig', newline='') as f:
+            reader = csv.DictReader(f)
+            if all(field in (reader.fieldnames or []) for field in FIELDS):
+                return
+            fields = list(dict.fromkeys((reader.fieldnames or []) + FIELDS))
+            rows = list(reader)
+        backup = Path(str(path) + '.legacy.bak')
+        if not backup.exists():
+            shutil.copy2(path, backup)
+        for row in rows:
+            try:
+                row.update(place_id=place_id(row), identity_key=identity_key(row))
+            except ValueError:
+                pass  # retain incomplete legacy records, never suppress by name
+    with atomic_output(path, encoding='utf-8-sig') as f:
+        writer = csv.DictWriter(f, fieldnames=fields)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def load_existing_ids(filepath):
     existing = set()
     if os.path.exists(filepath):
-        with open(filepath, "r", encoding="utf-8-sig") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                if "가게명" in row:
-                    existing.add(row["가게명"])
+        with open(filepath, encoding='utf-8-sig') as f:
+            for row in csv.DictReader(f):
+                try:
+                    existing.add(place_id(row))
+                except ValueError:
+                    continue
     return existing
 
+
 def save_item(filepath, data):
-    """
-    장소 한 건을 CSV 파일 끝에 즉시 추가(append)한다.
-    여러 건을 메모리에 모았다가 한 번에 저장하는 방식이 아니라,
-    한 건이 수집될 때마다 곧바로 디스크에 기록함으로써,
-    크롤링이 중간에 비정상 종료되더라도 그 시점까지의 데이터가 안전하게 보존된다.
-    """
-    with open(filepath, "a", encoding="utf-8-sig", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow([
-            data.get("page", ""),
-            data.get("rank", ""),
-            data.get("name", ""),
-            data.get("category", ""),
-            data.get("address", ""),
-            data.get("keyword", ""),
-            data.get("visitor_review", 0),
-            data.get("blog_review", 0),
-            data.get("operating_time", "")
-        ])
+    row = dict(zip(FIELDS[:9], [data.get(k, '') for k in (
+        'page', 'rank', 'name', 'category', 'address', 'keyword', 'visitor_review', 'blog_review', 'operating_time')]))
+    for field in ('search_region', 'search_category', 'category_source'):
+        row[field] = data.get(field, '')
+    row['provider'] = data.get('provider', '')
+    row['provider_place_id'] = data.get('provider_place_id', '')
+    row['identity_key'] = identity_key(row)
+    row['place_id'] = place_id(row)
+    row.update(source_name=row['가게명'], source_address=row['주소'],
+               source_list_text=data.get('source_list_text', ''),
+               display_name=display_name(row['가게명'], row['카테고리']),
+               display_address=display_address(row['주소']))
+    with exclusive_output(filepath):
+        _touch_init_file(filepath)
+        with open(filepath, encoding='utf-8-sig', newline='') as stream:
+            reader = csv.DictReader(stream)
+            fields, rows = reader.fieldnames, list(reader)
+        for previous in rows:
+            try:
+                if place_id(previous) == row['place_id']:
+                    return row['place_id']
+            except ValueError:
+                continue  # Incomplete legacy rows stay in the CSV.
+        with atomic_output(filepath, encoding='utf-8-sig') as stream:
+            writer = csv.DictWriter(stream, fieldnames=fields)
+            writer.writeheader()
+            writer.writerows(rows)
+            writer.writerow(row)
+    return row['place_id']
