@@ -77,6 +77,7 @@ def parse_post_html(html, url, place, query):
     return {'url': url, 'query': query, 'fetched_at': datetime.now(timezone.utc).isoformat(),
             'name_excerpt': name_excerpt, 'address_excerpt': address_excerpt,
             'provider_url': provider_url, 'tags': tags,
+            'tag_scope': 'whole_post_unreviewed',
             'tag_parser': 'gsTagName' if tag_match else 'no_supported_tag_payload'}
 
 
@@ -112,8 +113,12 @@ def _collection_result(place, audit, interrupted=False):
                      p.get('tag_parser', 'gsTagName') != 'gsTagName' for p in posts))
     verified = [post for post in posts if post['outcome'] == 'identity_accepted']
     tags, verified = tags_from_posts(place, verified)
+    pending_review = sum(p['outcome'] == 'identity_accepted' and bool(p.get('tags'))
+                         and p not in verified for p in posts)
+    audit['tag_review_pending'] = pending_review
     status = ('interrupted' if interrupted else 'fetch_error' if audit.get('search_error') else
               'verified' if tags else 'fetch_error' if audit['fetch_failure'] else
+              'needs_review' if pending_review else
               'parse_unavailable' if audit['body_unavailable'] or audit['tag_payload_unavailable'] else
               'no_verified_posts')
     audit.update(unique_tag_count=len(tags), finished_at=datetime.now(timezone.utc).isoformat(), status=status)

@@ -2,6 +2,7 @@
 import copy
 import hashlib
 import json
+from blog_evidence import reviewed_tags_post
 
 import pandas as pd
 import pytest
@@ -22,8 +23,12 @@ def place(number=123, address='충남 천안시 중앙로 10'):
 
 
 def proof(p, url=URL, tags=None):
-    return {'url': url, 'name_excerpt': p['가게명'] + ' 후기', 'address_excerpt': p['주소'],
+    value = {'url': url, 'name_excerpt': p['가게명'] + ' 후기', 'address_excerpt': p['주소'],
             'tags': ['조용한'] if tags is None else tags, 'tag_parser': 'gsTagName'}
+    try:
+        return reviewed_tags_post(p, value, value['tags'])
+    except ValueError:
+        return value  # Deliberately malformed evidence fixtures remain unreviewed.
 
 
 @pytest.fixture
@@ -172,6 +177,7 @@ def test_done_revalidates_against_current_batch_identity(current):
 def test_addressless_proof_cannot_follow_another_provider_or_local_promotion():
     p = place(address='주소없음')
     post = {**proof(p), 'provider_url': 'https://m.place.naver.com/cafe/123/home'}
+    post = reviewed_tags_post(p, post, post['tags'])
     cached = {**p, 'blog_tag_status': 'verified', 'verified_posts': json.dumps([post])}
     assert collector._done_ids(pd.DataFrame([cached])) == {'naver:123'}
     for update in ({'provider': 'kakao', 'place_id': 'kakao:123'},
@@ -203,7 +209,7 @@ def test_http_retry_attempts_and_latest_post_counts_remain_separate(monkeypatch,
     assert len(calls) == len(resumed['audit']['request_trace']) == 3
     assert resumed['audit']['identity_accepted'] == 1
     assert resumed['audit']['identity_rejected'] == resumed['audit']['fetch_failure'] == 0
-    assert resumed['record']['blog_tag_status'] == 'verified'
+    assert resumed['record']['blog_tag_status'] == 'needs_review'
     assert 'synthetic-private-error' not in json.dumps(resumed)
 
 
@@ -414,6 +420,7 @@ def test_batch_revalidates_completion_before_skipping(tmp_path, monkeypatch, no_
 def test_done_loader_preserves_provider_id_leading_zeros(tmp_path):
     p = place('00123', address='지원하지 않는 주소')
     post = {**proof(p), 'provider_url': 'https://m.place.naver.com/cafe/00123/home'}
+    post = reviewed_tags_post(p, post, post['tags'])
     row = {**p, 'blog_tag_status': 'verified', 'verified_posts': json.dumps([post])}
     path = tmp_path / 'tags.csv'
     pd.DataFrame([row]).to_csv(path, index=False)

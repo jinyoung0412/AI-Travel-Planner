@@ -82,6 +82,15 @@ void main() {
   }
 
   Future<void> tap(WidgetTester tester, String text) async {
+    if (['친구와', '아이와 함께'].contains(text) &&
+        find.text(text).evaluate().isEmpty) {
+      await tap(tester, '직접 태그 선택하기');
+      await tap(tester, text);
+      for (var i = 0; i < 5 && find.text('선택 완료').evaluate().isNotEmpty; i++) {
+        await tap(tester, '선택 완료');
+      }
+      return;
+    }
     final label = find.text(text).last;
     final choices = find.ancestor(of: label, matching: find.byType(ChoiceChip));
     final finder = choices.evaluate().isEmpty ? label : choices;
@@ -91,11 +100,14 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  bool selected(WidgetTester tester, String label) => tester
-      .widget<ChoiceChip>(
-        find.ancestor(of: find.text(label), matching: find.byType(ChoiceChip)),
-      )
-      .selected;
+  bool selected(WidgetTester tester, String label) {
+    final chip = find.ancestor(
+      of: find.text(label),
+      matching: find.byType(ChoiceChip),
+    );
+    return chip.evaluate().isNotEmpty &&
+        tester.widget<ChoiceChip>(chip).selected;
+  }
 
   testWidgets(
     'GPS failure is recoverable and region selection works without permission',
@@ -182,18 +194,17 @@ void main() {
       await mount(tester, source);
       await tap(tester, '다음');
       await tester.enterText(find.byType(TextField), '첫 요청');
-      await tester.tap(find.text('AI 태그 자동 선택'));
+      await tester.tap(find.text('문장으로 태그 고르기'));
       await tester.pump();
-      await tester.ensureVisible(find.text('친구와'));
-      await tester.tap(find.text('친구와'));
+      await tap(tester, '친구와');
       await tester.pump();
       source.suggestions.single.complete(['혼자']);
       await tester.pumpAndSettle();
       expect(selected(tester, '친구와'), true);
       expect(selected(tester, '혼자'), false);
       await tester.enterText(find.byType(TextField), '둘째 요청');
-      await tester.ensureVisible(find.text('AI 태그 자동 선택'));
-      await tester.tap(find.text('AI 태그 자동 선택'));
+      await tester.ensureVisible(find.text('문장으로 태그 고르기'));
+      await tester.tap(find.text('문장으로 태그 고르기'));
       await tester.pump();
       await tester.enterText(find.byType(TextField), '셋째 요청');
       source.suggestions.last.complete(['연인과']);
@@ -212,9 +223,9 @@ void main() {
       final source = FakeRecommendations();
       await mount(tester, source, mode: 'course', scale: 1.5);
       await tap(tester, '다음');
-      await tester.enterText(find.byType(TextField), '친구와 쇼핑');
-      await tester.ensureVisible(find.text('AI 태그 자동 선택'));
-      await tester.tap(find.text('AI 태그 자동 선택'));
+      await tester.enterText(find.byType(TextField), '친구와 만들기 체험');
+      await tester.ensureVisible(find.text('문장으로 태그 고르기'));
+      await tester.tap(find.text('문장으로 태그 고르기'));
       await tester.pump();
       source.suggestions.single.complete([
         '친구와',
@@ -229,8 +240,21 @@ void main() {
       expect(selected(tester, '친구와'), true);
       expect(selected(tester, '혼자'), false);
       await tap(tester, '다음');
-      await tap(tester, '자연·산책');
-      await tap(tester, '쇼핑');
+      await tap(tester, '산책·자연');
+      for (final activity in [
+        '식사',
+        '카페·디저트',
+        '산책·자연',
+        '전시·문화관람',
+        '체험·만들기',
+        '실내 놀거리',
+      ]) {
+        expect(find.text(activity), findsWidgets);
+      }
+      expect(find.text('쇼핑'), findsNothing);
+      expect(find.text('관광지'), findsNothing);
+      expect(find.text('등산'), findsNothing);
+      await tap(tester, '체험·만들기');
       await tap(tester, '이전');
       await tap(tester, '이전');
       await tap(tester, '3곳');
@@ -239,8 +263,8 @@ void main() {
       await tester.tap(find.text('코스 추천받기'));
       await tester.pump();
       final request = source.requests.single;
-      expect(request.slotTypes, ['음식', '쇼핑', '카페']);
-      expect(request.tags, ['친구와', '조용한', '감성적인']);
+      expect(request.slotTypes, ['음식', '체험', '카페']);
+      expect(request.tags, ['친구와', '조용한', '감성적인', '실내 위주']);
       expect(request.count, 3);
       source.responses.single.complete({
         'courses': [],
@@ -249,6 +273,12 @@ void main() {
       });
       await tester.pumpAndSettle();
       expect(find.byType(CourseResultScreen), findsOneWidget);
+      expect(
+        tester
+            .widget<CourseResultScreen>(find.byType(CourseResultScreen))
+            .transport,
+        request.transport,
+      );
       expect(find.textContaining('조건에 맞는 코스가 없어요'), findsOneWidget);
       expect(find.byTooltip('코스를 저장'), findsNothing);
       expect(tester.takeException(), isNull);
@@ -267,7 +297,7 @@ void main() {
       await tap(tester, '친구와');
       await tester.tap(find.text('장소 추천받기'));
       await tester.pump(const Duration(milliseconds: 350));
-      await tap(tester, '취소');
+      await tap(tester, '돌아가기');
       expect(source.requests, isEmpty);
       await tester.tap(find.text('장소 추천받기'));
       await tester.pump(const Duration(milliseconds: 350));
@@ -292,8 +322,8 @@ void main() {
     await tap(tester, '다음');
     await tap(tester, '친구와');
     await tester.enterText(find.byType(TextField), '알 수 없는 설명');
-    await tester.ensureVisible(find.text('AI 태그 자동 선택'));
-    await tester.tap(find.text('AI 태그 자동 선택'));
+    await tester.ensureVisible(find.text('문장으로 태그 고르기'));
+    await tester.tap(find.text('문장으로 태그 고르기'));
     await tester.pump();
     source.suggestions.single.complete([]);
     await tester.pumpAndSettle();
@@ -315,8 +345,8 @@ void main() {
       await tap(tester, '다음');
       await tap(tester, '친구와');
       await tester.enterText(find.byType(TextField), '조용한 카페');
-      await tester.ensureVisible(find.text('AI 태그 자동 선택'));
-      await tester.tap(find.text('AI 태그 자동 선택'));
+      await tester.ensureVisible(find.text('문장으로 태그 고르기'));
+      await tester.tap(find.text('문장으로 태그 고르기'));
       await tester.pump();
       source.suggestions.single.completeError(TagSuggestionException(reason));
       await tester.pumpAndSettle();
@@ -327,10 +357,13 @@ void main() {
         tester.widget<TextField>(find.byType(TextField)).controller!.text,
         '조용한 카페',
       );
-      await tester.tap(find.text('AI 태그 자동 선택'));
+      await tester.tap(find.text('문장으로 태그 고르기'));
       await tester.pump();
       source.suggestions.last.complete(['연인과', '조용한']);
       await tester.pumpAndSettle();
+      expect(find.text('선택을 이렇게 바꿀까요?'), findsOneWidget);
+      expect(find.textContaining('동행: 친구와 → 연인과'), findsOneWidget);
+      await tap(tester, '변경 적용');
       expect(selected(tester, '연인과'), true);
       expect(selected(tester, '친구와'), false);
       expect(tester.takeException(), isNull);
@@ -344,7 +377,7 @@ void main() {
     await mount(tester, source);
     await tap(tester, '다음');
     await tester.enterText(find.byType(TextField), '첫 요청');
-    await tester.tap(find.text('AI 태그 자동 선택'));
+    await tester.tap(find.text('문장으로 태그 고르기'));
     await tester.pump();
     await tester.enterText(find.byType(TextField), '새 요청');
     source.suggestions.single.completeError(
@@ -352,7 +385,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.textContaining('서버에 연결하지 못했어요'), findsNothing);
-    await tester.tap(find.text('AI 태그 자동 선택'));
+    await tester.tap(find.text('문장으로 태그 고르기'));
     await tester.pump();
     await tester.pumpWidget(const MaterialApp(home: SizedBox()));
     source.suggestions.last.completeError(
@@ -397,7 +430,8 @@ void main() {
             await mount(tester, source, mode: mode);
             await tap(tester, region.key);
             await tap(tester, hub.name);
-            expect(find.textContaining('대표 위치 기준'), findsOneWidget);
+            expect(find.textContaining('대표 위치 기준'), findsNothing);
+            expect(find.textContaining('역·터미널의'), findsNothing);
             await tap(tester, '다음');
             await tap(tester, '친구와');
             if (mode == 'course') await tap(tester, '다음');
@@ -417,4 +451,25 @@ void main() {
       );
     }
   }
+  testWidgets(
+    'AI companion replacement requires acceptance and cancel preserves choices',
+    (tester) async {
+      final source = FakeRecommendations();
+      await mount(tester, source);
+      await tap(tester, '다음');
+      await tap(tester, '아이와 함께');
+      await tester.enterText(find.byType(TextField), '조용한 카페');
+      await tester.ensureVisible(find.text('문장으로 태그 고르기'));
+      await tester.tap(find.text('문장으로 태그 고르기'));
+      await tester.pump();
+      source.suggestions.single.complete(['혼자', '조용한']);
+      await tester.pumpAndSettle();
+      expect(find.textContaining('동행: 아이와 함께 → 혼자'), findsOneWidget);
+      await tap(tester, '유지하기');
+      expect(selected(tester, '아이와 함께'), true);
+      expect(selected(tester, '혼자'), false);
+      expect(selected(tester, '조용한'), false);
+      expect(tester.takeException(), isNull);
+    },
+  );
 }

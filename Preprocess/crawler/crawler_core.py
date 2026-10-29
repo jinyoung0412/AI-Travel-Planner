@@ -211,7 +211,7 @@ class ChungnamCrawler:
                     continue
                 save_item(csv_path, {
                     "page": page, "rank": idx + 1, "name": name,
-                    "category": cat if cat else category, "address": addr,
+                    "category": cat, "address": addr,
                     "search_region": region, "search_category": category,
                     "category_source": "provider" if cat else "search_fallback",
                     "keyword": keyword, "visitor_review": v_rev,

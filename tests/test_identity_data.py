@@ -1,4 +1,5 @@
 import json
+from blog_evidence import reviewed_tags_post
 import sqlite3
 import pandas as pd
 import pytest
@@ -12,8 +13,12 @@ from Preprocess.crawler.saver import touch_init_file, save_item, load_existing_i
 
 
 def post(address='충남 천안시 테스트로 1', tags=None):
-    return {'url': 'https://blog.naver.com/reviewer/123', 'name_excerpt': '오늘 장소0 방문',
+    value = {'url': 'https://blog.naver.com/reviewer/123', 'name_excerpt': '오늘 장소0 방문',
             'address_excerpt': address, 'tags': tags or ['천안맛집']}
+    try:
+        return reviewed_tags_post({'가게명': '장소0', '주소': address}, value, value['tags'])
+    except ValueError:
+        return value  # Deliberately malformed evidence fixtures remain unreviewed.
 
 
 def test_names_addresses_normalization_and_recollection(places):
@@ -89,6 +94,7 @@ def test_resume_identity_and_retry_errors(tmp_path, places):
     data = p.assign(blog_tag_status=['verified', 'fetch_error', 'no_verified_posts'])
     post = {'url': 'https://blog.naver.com/reviewer/123', 'name_excerpt': p.iloc[0]['가게명'],
             'address_excerpt': p.iloc[0]['주소'], 'tags': ['조용한']}
+    post = reviewed_tags_post(p.iloc[0].to_dict(), post, post['tags'])
     data['verified_posts'] = [json.dumps([post]), '[]', '[]']
     data.to_csv(path, index=False)
     assert load_done_set(path) == {p.iloc[0]['place_id'], p.iloc[2]['place_id']}
@@ -109,10 +115,10 @@ def test_collector_checks_body_evidence_with_mocked_http(monkeypatch, places):
     monkeypatch.setenv('NAVER_API_SECRET', 'mock')
     monkeypatch.setattr(collector.requests, 'get', get)
     result = collect_place_tags(ensure_ids(places.head(1)).iloc[0].to_dict(), delay=0)
-    assert result['blog_tag_status'] == 'verified'
+    assert result['blog_tag_status'] == 'needs_review'
+    assert result['blog_tags'] == '{}' and result['verified_posts'] == '[]'
     assert '천안시 테스트로 1' in calls[0][1]['params']['query']
-    evidence = json.loads(result['verified_posts'])[0]
-    assert evidence['address_excerpt'] and evidence['name_excerpt'] and evidence['query']
+    # Identity excerpts stay in the collection audit until place-level review.
 
 
 def test_migration_backup_quarantine_idempotence(tmp_path, places):

@@ -4,7 +4,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from blog_evidence import verify_post
+from blog_evidence import verify_post, reviewed_tags_post
 from place_identity import ensure_ids
 from Preprocess.RunPreprocess.build_database import merge_verified_tags
 from Preprocess.RunPreprocess.collect_blog_tags import collect_place_tags
@@ -35,14 +35,16 @@ def test_mocked_collection_to_database_uses_same_address_rule(case, monkeypatch)
     result = collect_place_tags(place, delay=0)
     merged, _ = merge_verified_tags(pd.DataFrame([place]), pd.DataFrame([{
         'place_id': place['place_id'], **result}]))
-    assert (result['blog_tag_status'] == 'verified') is case['matches']
-    assert json.loads(merged.iloc[0]['blog_tags']) == ({'source-tag': 1} if case['matches'] else {})
+    assert (result['blog_tag_status'] == 'needs_review') is case['matches']
+    assert json.loads(merged.iloc[0]['blog_tags']) == {}
+    # Mentioning the correct place never proves ownership of whole-post tags.
 
 
 def test_mixed_post_evidence_keeps_valid_post_and_quarantines_wrong_road():
     place = ensure_ids(pd.DataFrame([PLACE])).iloc[0].to_dict()
     base = {'url': 'https://blog.naver.com/reviewer/1', 'name_excerpt': '아지트 후기',
             'address_excerpt': '천안시 중앙로 10', 'tags': ['right']}
+    base = reviewed_tags_post(place, base, base['tags'])
     wrong = {**base, 'url': 'https://blog.naver.com/reviewer/2',
              'address_excerpt': '천안시 서부중앙로 10', 'tags': ['wrong']}
     result, quarantine = merge_verified_tags(pd.DataFrame([place]), pd.DataFrame([{

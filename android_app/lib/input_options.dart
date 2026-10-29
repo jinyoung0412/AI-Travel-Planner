@@ -20,11 +20,27 @@ const _kSlotStyles = {
   '음식': _SlotStyle(Icons.restaurant, Color(0xFFFF7043)),
   '카페': _SlotStyle(Icons.local_cafe, Color(0xFF795548)),
   '자연·산책': _SlotStyle(Icons.nature_people, Color(0xFF43A047)),
-  '등산': _SlotStyle(Icons.terrain, Color(0xFF2E7D32)),
   '문화·역사': _SlotStyle(Icons.account_balance, Color(0xFF7B1FA2)),
-  '쇼핑': _SlotStyle(Icons.shopping_cart, Color(0xFFE91E63)),
-  '관광지': _SlotStyle(Icons.place, Color(0xFF1976D2)),
+  '체험': _SlotStyle(Icons.palette, Color(0xFFE91E63)),
   '실내 오락': _SlotStyle(Icons.videogame_asset, Color(0xFF5E35B1)),
+};
+
+// Labels can change without rewriting stored/requested slot values.
+const _kSlotLabels = {
+  '음식': '식사',
+  '카페': '카페·디저트',
+  '자연·산책': '산책·자연',
+  '문화·역사': '전시·문화관람',
+  '체험': '체험·만들기',
+  '실내 오락': '실내 놀거리',
+};
+const _kActivityTagLabels = {
+  '맛집 탐방': '식사',
+  '카페 투어': '카페·디저트',
+  '자연/산책': '산책·자연',
+  '문화·역사 탐방': '전시·문화관람',
+  '체험 공방': '체험·만들기',
+  '노래방/실내 오락': '실내 놀거리',
 };
 
 const _kDefaultCourse = ['음식', '자연·산책', '카페', '문화·역사', '음식'];
@@ -64,15 +80,9 @@ const Map<String, List<String>> _kTagGroups = {
   '어떤 활동': [
     '맛집 탐방',
     '카페 투어',
-    '문화·역사 탐방',
-    '박물관/전시',
-    '쇼핑',
     '자연/산책',
-    '등산/트레킹',
-    '사진 명소',
-    '스포츠/레저',
+    '문화·역사 탐방',
     '체험 공방',
-    '전통/한옥',
     '노래방/실내 오락',
   ],
 };

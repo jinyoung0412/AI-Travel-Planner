@@ -111,7 +111,8 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(find.textContaining('직선거리 추정'), findsOneWidget);
+      expect(find.textContaining('직선거리 추정'), findsNothing);
+      expect(find.text('약 1.2 km'), findsOneWidget);
       await tester.tap(find.byIcon(Icons.bookmark_outline_rounded));
       await tester.pumpAndSettle();
       final saved = (await LocalStorageService.getSavedCourses()).single;
@@ -201,7 +202,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(find.textContaining('코스 거리를 표시하지 않아요'), findsOneWidget);
+      expect(find.textContaining('코스 거리를 표시하지 않아요'), findsNothing);
       expect(find.textContaining('0.9km'), findsNothing);
       await tester.tap(find.byIcon(Icons.bookmark_outline_rounded));
       await tester.pumpAndSettle();
@@ -218,7 +219,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('확인 필요'));
       await tester.pumpAndSettle();
-      expect(find.textContaining('코스 거리를 표시하지 않아요'), findsOneWidget);
+      expect(find.textContaining('코스 거리를 표시하지 않아요'), findsNothing);
       expect(find.textContaining('0.9km'), findsNothing);
       expect(tester.takeException(), isNull);
     },

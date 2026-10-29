@@ -69,9 +69,9 @@ class _BookmarkButtonState extends State<BookmarkButton> {
       );
     } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('저장소를 변경하지 못했어요. 다시 시도해주세요.')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('저장하지 못했어요. 다시 시도해주세요.')));
       }
     } finally {
       if (mounted) setState(() => _busy = false);

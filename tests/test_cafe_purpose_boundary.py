@@ -117,7 +117,8 @@ def test_manual_indoor_activity_and_explicit_board_request_remain_available(monk
     indoor = client.post('/recommend/spot', json={**ORIGIN, 'count': 5,
         'persona_tags': ['노래방/실내 오락']})
     assert indoor.status_code == 200
-    assert {r['category'] for r in indoor.json['places']} == set(SPECIALIZED_CAFE_CATS)
+    assert {r['category'] for r in indoor.json['places']} == {'보드카페', '방탈출카페'}
+    assert indoor.json['metadata']['family_policy']['child_venues_allowed'] is False
     board = client.post('/recommend/spot', json={**ORIGIN, 'count': 5,
         'user_text': '조용한 보드게임카페', 'persona_tags': ACTUAL_TAGS})
     assert board.status_code == 200
@@ -137,7 +138,7 @@ def test_course_cafe_slot_uses_same_boundary_and_indoor_slot_is_preserved(monkey
         if last == '카페':
             assert chosen['place_id'] == p.iloc[6]['place_id']
         else:
-            assert chosen['category'] in SPECIALIZED_CAFE_CATS
+            assert chosen['category'] in {'보드카페', '방탈출카페'}
         assert response.json['metadata']['constraints_relaxed'] == []
 
 

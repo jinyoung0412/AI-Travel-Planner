@@ -97,6 +97,11 @@ def read_sources(input_dir):
             frame[field] = existing.where(existing.str.strip().ne(''), default)
         frame['eup_myeon_dong'] = frame.get('eup_myeon_dong', frame['search_region']).fillna(frame['search_region'])
         frame['source_file'] = str(path.relative_to(input_dir))
+        # A search query is collection provenance, never a provider taxonomy.
+        # Historical rows without provenance remain explicitly unknown.
+        provenance = frame.get('category_source', pd.Series('', index=frame.index)).fillna('')
+        frame['category_source'] = provenance.where(provenance.ne(''), 'legacy_unknown')
+        frame.loc[provenance.eq('search_fallback'), '카테고리'] = ''
         frames.append(frame)
     if not frames:
         raise ValueError('크롤링된 유효한 원본 CSV 파일이 없습니다.')

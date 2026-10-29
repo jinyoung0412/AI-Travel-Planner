@@ -59,11 +59,10 @@ void main() {
   }
 
   String url(MethodCall call) => (call.arguments as Map)['url'] as String;
-  Future<void> confirmCoordinates(WidgetTester tester) async {
+  Future<void> expectDirectMap(WidgetTester tester) async {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
-    expect(find.textContaining('실제 장소와 일치하는지 확인되지 않았어요'), findsOneWidget);
-    await tester.tap(find.text('참고 위치 열기').last);
+    expect(find.byType(AlertDialog), findsNothing);
   }
 
   testWidgets(
@@ -76,8 +75,8 @@ void main() {
           return null;
         },
       );
-      await tester.tap(find.byType(TextButton));
-      await confirmCoordinates(tester);
+      await tester.tap(find.byType(FilledButton));
+      await expectDirectMap(tester);
       await tester.pumpAndSettle();
       expect(url(calls.first), 'kakaomap://look?p=36.8,127.1');
       expect(calls.last.method, 'launch');
@@ -90,8 +89,8 @@ void main() {
   ) async {
     appAvailable = true;
     await mount(tester);
-    await tester.tap(find.byType(TextButton));
-    await confirmCoordinates(tester);
+    await tester.tap(find.byType(FilledButton));
+    await expectDirectMap(tester);
     await tester.pumpAndSettle();
     expect(calls.where((c) => c.method == 'launch').length, 1);
     expect(url(calls.last), startsWith('kakaomap:'));
@@ -125,12 +124,10 @@ void main() {
           return null;
         },
       );
-      await tester.tap(find.byType(TextButton));
+      await tester.tap(find.byType(FilledButton));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
-      expect(calls, isEmpty);
-      expect(find.textContaining(name), findsOneWidget);
-      await confirmCoordinates(tester);
+      await expectDirectMap(tester);
       await tester.pumpAndSettle();
       final launches = calls.where((call) => call.method == 'launch').toList();
       expect(launches, hasLength(1));
@@ -154,8 +151,8 @@ void main() {
           return detail.future;
         },
       );
-      await tester.tap(find.byType(TextButton));
-      await tester.tap(find.byType(TextButton));
+      await tester.tap(find.byType(FilledButton));
+      await tester.tap(find.byType(FilledButton));
       expect(lookups, 1);
       await tester.pumpWidget(const MaterialApp(home: SizedBox()));
       detail.complete('https://place.map.kakao.com/1');
@@ -169,14 +166,14 @@ void main() {
   ) async {
     launchSucceeds = false;
     await mount(tester);
-    await tester.tap(find.byType(TextButton));
-    await confirmCoordinates(tester);
+    await tester.tap(find.byType(FilledButton));
+    await expectDirectMap(tester);
     await tester.pumpAndSettle();
     expect(find.textContaining('지도를 열 수 없어요'), findsOneWidget);
     expect(tester.takeException(), isNull);
     calls.clear();
     await mount(tester, place: {'name': '위치 없음'});
-    await tester.tap(find.byType(TextButton));
+    await tester.tap(find.byType(FilledButton));
     await tester.pumpAndSettle();
     expect(calls, isEmpty);
     expect(tester.takeException(), isNull);
@@ -193,24 +190,24 @@ void main() {
           return 'https://place.map.kakao.com/117300047';
         },
       );
-      await tester.tap(find.byType(TextButton));
+      await tester.tap(find.byType(FilledButton));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 318));
-      await tester.tap(find.byType(TextButton));
+      await tester.tap(find.byType(FilledButton));
       await tester.pump(const Duration(milliseconds: 318));
-      await tester.tap(find.byType(TextButton));
+      await tester.tap(find.byType(FilledButton));
       expect(lookups, 1);
       expect(calls.where((call) => call.method == 'launch').length, 1);
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
       await tester.pump(const Duration(seconds: 3));
       expect(
-        tester.widget<TextButton>(find.byType(TextButton)).onPressed,
+        tester.widget<FilledButton>(find.byType(FilledButton)).onPressed,
         isNull,
       );
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
       await tester.pumpAndSettle();
-      await tester.tap(find.byType(TextButton));
+      await tester.tap(find.byType(FilledButton));
       await tester.pumpAndSettle();
       expect(lookups, 2);
       expect(calls.where((call) => call.method == 'launch').length, 2);
@@ -221,20 +218,20 @@ void main() {
     'missing lifecycle events unlock retry after the bounded transition guard',
     (tester) async {
       await mount(tester, lookup: (_) async => 'https://place.map.kakao.com/1');
-      await tester.tap(find.byType(TextButton));
+      await tester.tap(find.byType(FilledButton));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 500));
       expect(
-        tester.widget<TextButton>(find.byType(TextButton)).onPressed,
+        tester.widget<FilledButton>(find.byType(FilledButton)).onPressed,
         isNull,
       );
       await tester.pump(const Duration(seconds: 2));
       await tester.pump();
       expect(
-        tester.widget<TextButton>(find.byType(TextButton)).onPressed,
+        tester.widget<FilledButton>(find.byType(FilledButton)).onPressed,
         isNotNull,
       );
-      await tester.tap(find.byType(TextButton));
+      await tester.tap(find.byType(FilledButton));
       await tester.pumpAndSettle();
       expect(calls.where((call) => call.method == 'launch').length, 2);
     },
@@ -246,16 +243,16 @@ void main() {
       final completion = Completer<bool>();
       launchHandler = () => completion.future;
       await mount(tester, lookup: (_) async => 'https://place.map.kakao.com/1');
-      await tester.tap(find.byType(TextButton));
+      await tester.tap(find.byType(FilledButton));
       await tester.pump();
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
-      await tester.tap(find.byType(TextButton));
+      await tester.tap(find.byType(FilledButton));
       expect(calls.where((call) => call.method == 'launch').length, 1);
       completion.complete(true);
       await tester.pumpAndSettle();
       expect(
-        tester.widget<TextButton>(find.byType(TextButton)).onPressed,
+        tester.widget<FilledButton>(find.byType(FilledButton)).onPressed,
         isNotNull,
       );
     },
@@ -267,7 +264,7 @@ void main() {
       final completion = Completer<bool>();
       launchHandler = () => completion.future;
       await mount(tester, lookup: (_) async => 'https://place.map.kakao.com/1');
-      await tester.tap(find.byType(TextButton));
+      await tester.tap(find.byType(FilledButton));
       await tester.pump();
       await tester.pump(const Duration(seconds: 5));
       await tester.pumpAndSettle();
@@ -275,35 +272,36 @@ void main() {
       expect(find.textContaining('지도를 열 수 없어요'), findsOneWidget);
       completion.complete(true);
       launchHandler = null;
-      await tester.tap(find.byType(TextButton));
+      await tester.tap(find.byType(FilledButton));
       await tester.pumpAndSettle();
       expect(calls.where((call) => call.method == 'launch').length, 2);
     },
   );
 
   testWidgets(
-    'lookup timeout shows unverified coordinate choice and cancellation unlocks',
+    'lookup timeout opens coordinates once and ignores late detail completion',
     (tester) async {
       final detail = Completer<String?>();
       await mount(tester, lookup: (_) => detail.future);
-      await tester.tap(find.byType(TextButton));
+      await tester.tap(find.byType(FilledButton));
       await tester.pump(const Duration(seconds: 36));
       await tester.pump(const Duration(milliseconds: 300));
-      expect(calls, isEmpty);
-      await tester.tap(find.text('취소'));
       await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(calls.where((call) => call.method == 'launch'), hasLength(1));
+      expect(url(calls.last), 'https://map.kakao.com/link/map/36.8,127.1');
       detail.complete('https://place.map.kakao.com/1');
       await tester.pump();
-      expect(calls, isEmpty);
+      expect(calls.where((call) => call.method == 'launch'), hasLength(1));
       expect(
-        tester.widget<TextButton>(find.byType(TextButton)).onPressed,
+        tester.widget<FilledButton>(find.byType(FilledButton)).onPressed,
         isNotNull,
       );
     },
   );
 
   testWidgets(
-    'coordinate confirmation applies to concrete addresses and never changes coordinates',
+    'direct map opening preserves original coordinates for concrete addresses',
     (tester) async {
       final place = {
         'name': '기존 저장 공원',
@@ -312,8 +310,8 @@ void main() {
         'lng': 127.1488888,
       };
       await mount(tester, place: place);
-      await tester.tap(find.byType(TextButton));
-      await confirmCoordinates(tester);
+      await tester.tap(find.byType(FilledButton));
+      await expectDirectMap(tester);
       await tester.pumpAndSettle();
       expect(
         url(calls.last),
@@ -359,12 +357,12 @@ void main() {
     final completion = Completer<bool>();
     launchHandler = () => completion.future;
     await mount(tester, lookup: (_) async => 'https://place.map.kakao.com/1');
-    await tester.tap(find.byType(TextButton));
+    await tester.tap(find.byType(FilledButton));
     await tester.pump();
     await tester.pumpWidget(const MaterialApp(home: SizedBox()));
     launchHandler = null;
     await mount(tester, lookup: (_) async => 'https://place.map.kakao.com/2');
-    await tester.tap(find.byType(TextButton));
+    await tester.tap(find.byType(FilledButton));
     await tester.pumpAndSettle();
     completion.complete(true);
     await tester.pumpAndSettle();
@@ -388,11 +386,11 @@ void main() {
           },
         },
       );
-      await tester.tap(find.byType(TextButton));
+      await tester.tap(find.byType(FilledButton));
       await tester.pumpAndSettle();
       expect(calls, isEmpty);
       expect(find.byType(AlertDialog), findsNothing);
-      expect(find.textContaining('좌표 품질 확인이 필요한 장소'), findsOneWidget);
+      expect(find.textContaining('위치를 찾지 못했어요'), findsOneWidget);
     },
   );
 
@@ -412,7 +410,7 @@ void main() {
           },
         },
       );
-      await tester.tap(find.byType(TextButton));
+      await tester.tap(find.byType(FilledButton));
       await tester.pumpAndSettle();
       expect(calls, hasLength(1));
       expect(url(calls.single), 'https://place.map.kakao.com/117300047');
@@ -443,7 +441,7 @@ void main() {
           throw StateError('the saved destination must not need a network');
         },
       );
-      await tester.tap(find.byType(TextButton));
+      await tester.tap(find.byType(FilledButton));
       await tester.pumpAndSettle();
       expect(lookups, 0);
       expect(calls, hasLength(1));
@@ -468,13 +466,13 @@ void main() {
           },
         },
       );
-      await tester.tap(find.byType(TextButton));
+      await tester.tap(find.byType(FilledButton));
       await tester.pumpAndSettle();
       expect(calls, isEmpty);
-      expect(find.textContaining('좌표 품질 확인이 필요한 장소'), findsOneWidget);
+      expect(find.textContaining('위치를 찾지 못했어요'), findsOneWidget);
       expect(find.byType(AlertDialog), findsNothing);
       expect(
-        tester.widget<TextButton>(find.byType(TextButton)).onPressed,
+        tester.widget<FilledButton>(find.byType(FilledButton)).onPressed,
         isNotNull,
       );
     },
@@ -488,17 +486,17 @@ void main() {
       tester,
       lookup: (_) async => throw StateError('private provider'),
     );
-    await tester.tap(find.byType(TextButton));
-    await confirmCoordinates(tester);
+    await tester.tap(find.byType(FilledButton));
+    await expectDirectMap(tester);
     await tester.pumpAndSettle();
     expect(find.textContaining('지도를 열 수 없어요'), findsOneWidget);
     expect(
-      tester.widget<TextButton>(find.byType(TextButton)).onPressed,
+      tester.widget<FilledButton>(find.byType(FilledButton)).onPressed,
       isNotNull,
     );
     launchSucceeds = true;
-    await tester.tap(find.byType(TextButton));
-    await confirmCoordinates(tester);
+    await tester.tap(find.byType(FilledButton));
+    await expectDirectMap(tester);
     await tester.pumpAndSettle();
     expect(calls.where((call) => call.method == 'launch').length, 2);
   });
@@ -508,7 +506,7 @@ void main() {
   ) async {
     final detail = Completer<String?>();
     await mount(tester, lookup: (_) => detail.future);
-    await tester.tap(find.byType(TextButton));
+    await tester.tap(find.byType(FilledButton));
     await tester.pump();
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
@@ -518,7 +516,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(calls, isEmpty);
     expect(
-      tester.widget<TextButton>(find.byType(TextButton)).onPressed,
+      tester.widget<FilledButton>(find.byType(FilledButton)).onPressed,
       isNotNull,
     );
   });
@@ -535,8 +533,8 @@ void main() {
           'kakao_url': 'https://other.invalid/private',
         },
       );
-      await tester.tap(find.byType(TextButton));
-      await confirmCoordinates(tester);
+      await tester.tap(find.byType(FilledButton));
+      await expectDirectMap(tester);
       await tester.pumpAndSettle();
       expect(calls.any((call) => url(call).contains('other.invalid')), false);
       expect(url(calls.last), contains('https://map.kakao.com/link/map/'));
@@ -544,7 +542,7 @@ void main() {
   );
 
   testWidgets(
-    'long coordinate notice is scrollable and cancellable on small large-text screens',
+    'long place data opens map without a notice on small large-text screens',
     (tester) async {
       tester.view.physicalSize = const Size(320, 480);
       tester.view.devicePixelRatio = 1;
@@ -570,18 +568,13 @@ void main() {
           ),
         ),
       );
-      await tester.tap(find.byType(TextButton));
+      await tester.tap(find.byType(FilledButton));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
-      expect(
-        tester.widget<AlertDialog>(find.byType(AlertDialog)).scrollable,
-        true,
-      );
-      expect(tester.takeException(), isNull);
-      await tester.ensureVisible(find.text('취소'));
-      await tester.tap(find.text('취소'));
       await tester.pumpAndSettle();
-      expect(calls, isEmpty);
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(calls.where((call) => call.method == 'launch'), hasLength(1));
+      expect(url(calls.last), 'https://map.kakao.com/link/map/36.8,127.1');
       expect(tester.takeException(), isNull);
     },
   );

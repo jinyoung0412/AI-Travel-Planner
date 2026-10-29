@@ -3,12 +3,34 @@ const axios = require('axios');
 const cors = require('cors');
 const { findPlace, KAKAO_TIMEOUT_MS } = require('./kakao_place');
 const { upstreamRequest } = require('./upstream_request');
+const { createCourseRouteHandler } = require('./course_routes');
 require('dotenv').config({ path: require('path').join(__dirname, '..', '.env'), quiet: true });
 
 function positiveInteger(value, fallback, max) {
     const number = value === undefined ? fallback : Number(value);
     if (!Number.isInteger(number) || number < 1 || number > max) throw new Error('Invalid server configuration');
     return number;
+}
+
+function validTravelPreview(body) {
+    if (!body.travel_request || typeof body.travel_request !== 'object' || Array.isArray(body.travel_request)) return false;
+    if (body.clarification_required === true) {
+        const value = body.clarification;
+        if (body.intent_token !== undefined || !value || typeof value !== 'object' || Array.isArray(value) ||
+            value.kind !== 'activity' || typeof value.message !== 'string' || !value.message.trim() ||
+            typeof value.token !== 'string' || !value.token.trim() || value.token.length > 12000 ||
+            !Array.isArray(value.options) || !value.options.length || value.options.length > 6) return false;
+        const allowed = new Set(['음식', '카페', '자연·산책', '문화·역사', '체험', '실내 오락']);
+        const seen = new Set();
+        return value.options.every(option => {
+            if (!option || typeof option !== 'object' || Array.isArray(option) || !allowed.has(option.value) ||
+                seen.has(option.value) || typeof option.label !== 'string' || !option.label.trim()) return false;
+            seen.add(option.value);
+            return true;
+        });
+    }
+    return (body.clarification_required === undefined || body.clarification_required === false) &&
+        typeof body.intent_token === 'string';
 }
 
 function createApp({ httpClient = axios, env = process.env } = {}) {
@@ -32,7 +54,8 @@ function createApp({ httpClient = axios, env = process.env } = {}) {
             if (!upstream.canRespond()) return;
             upstream.checkDeadline();
             const body = response.data;
-            if (!body || typeof body !== 'object' || Array.isArray(body) || !Array.isArray(body[resultField])) {
+            if (!body || typeof body !== 'object' || Array.isArray(body) ||
+                (resultField === 'travel_request' ? !validTravelPreview(body) : !Array.isArray(body[resultField]))) {
                 return res.status(502).json({ success: false,
                     error: { error: '추천 서버의 응답을 확인하지 못했습니다.', reason: 'invalid_upstream_response' } });
             }
@@ -46,13 +69,26 @@ function createApp({ httpClient = axios, env = process.env } = {}) {
             // HTML, stack traces and transport exception strings never reach the app.
             if (!timedOut && [400, 422, 503].includes(status) && body && typeof body === 'object' &&
                 !Array.isArray(body) && typeof body.error === 'string' &&
-                ['invalid_request', 'outside_service_area', 'category_required', 'category_unavailable', 'tags_unavailable'].includes(body.reason)) {
+                ['invalid_request', 'outside_service_area', 'category_required', 'category_unavailable', 'tags_unavailable',
+                    'intent_unavailable', 'intent_conflict', 'intent_expired', 'course_confirmation_required',
+                    'unverified_conditions', 'insufficient_candidates', 'activity_clarification_required'].includes(body.reason)) {
                 return res.status(status).json({ success: false, error: body });
             }
             if (!timedOut && status === 422 && body && typeof body === 'object' &&
+                !Array.isArray(body) && typeof body.error === 'string' &&
                 body.metadata && ['insufficient_candidates', 'missing_slot_candidates', 'insufficient_distinct_places',
                     'insufficient_unique_courses'].includes(body.metadata.reason)) {
                 return res.status(422).json({ success: false, error: body });
+            }
+            // An HTTP failure proves the server was reached. Keep its private
+            // payload hidden, but do not tell users to fix their connection.
+            if (!timedOut && Number.isInteger(status) && status >= 400 && status <= 599) {
+                const malformed = status < 500;
+                return res.status(502).json({ success: false, error: {
+                    error: malformed ? '추천 서버의 응답을 확인하지 못했습니다.' :
+                        '추천 서버에서 요청을 처리하지 못했습니다. 잠시 후 다시 시도해주세요.',
+                    reason: malformed ? 'invalid_upstream_response' : 'upstream_error',
+                } });
             }
             return res.status(timedOut ? 504 : 502).json({ success: false, error: {
                 error: timedOut ? '추천 서버 응답 시간이 초과되었습니다.' : '추천 서버에 연결하지 못했습니다.',
@@ -63,9 +99,11 @@ function createApp({ httpClient = axios, env = process.env } = {}) {
         }
     }
 
-    for (const [path, field] of [['/suggest/tags', 'tags'], ['/recommend/spot', 'places'], ['/recommend/course', 'courses']]) {
+    for (const [path, field] of [['/travel/interpret', 'travel_request'], ['/suggest/tags', 'tags'], ['/recommend/spot', 'places'], ['/recommend/course', 'courses']]) {
         app.post(path, (req, res) => forwardToFlask(req, res, path, field));
     }
+
+    app.post('/routes/course', createCourseRouteHandler({ httpClient, env }));
 
     // Ambiguous or missing identity evidence falls back to the selected coordinate pin.
     app.get('/kakao/place', async (req, res) => {

@@ -20,6 +20,7 @@ CLAUDE.md
 # Raw/processed collection and recoverable local audit artifacts
 data/
 local_artifacts/
+output/
 error_log.txt
 *.log
 *.db.backup-*

@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 import 'tag_suggestion_exception.dart';
+import 'request_cancellation.dart';
 
 const defaultApiBaseUrl = String.fromEnvironment(
   'API_BASE_URL',
@@ -65,6 +66,8 @@ class ApiClient {
     required double userLng,
     required List<String> personaTags,
     required int count,
+    Map<String, dynamic> intentFields = const {},
+    RequestCancellation? cancellation,
   }) => post('/recommend/spot', {
     'user_text': userText,
     'transport': transport,
@@ -73,7 +76,8 @@ class ApiClient {
     'user_lng': userLng,
     'persona_tags': personaTags,
     'count': count,
-  });
+    ...intentFields,
+  }, cancellation: cancellation);
 
   Future<Map<String, dynamic>> getCourseRecommendation({
     required String transport,
@@ -84,6 +88,9 @@ class ApiClient {
     required int count,
     int spotCount = 5,
     List<String> slotTypes = const [],
+    String userText = '',
+    Map<String, dynamic> intentFields = const {},
+    RequestCancellation? cancellation,
   }) => post('/recommend/course', {
     'transport': transport,
     'region': region,
@@ -93,7 +100,9 @@ class ApiClient {
     'count': count,
     'spot_count': spotCount,
     'slot_types': slotTypes,
-  });
+    'user_text': userText,
+    ...intentFields,
+  }, cancellation: cancellation);
 
   Future<String?> getKakaoPlaceUrl({
     required String name,
@@ -129,8 +138,13 @@ class ApiClient {
     String method,
     Uri uri, [
     Map<String, dynamic>? body,
+    RequestCancellation? cancellation,
   ]) async {
+    if (cancellation?.isCancelled == true) throw const FormatException();
     final abort = Completer<void>();
+    cancellation?.signal.then((_) {
+      if (!abort.isCompleted) abort.complete();
+    });
     final request = http.AbortableRequest(
       method,
       uri,
@@ -146,7 +160,7 @@ class ApiClient {
         .timeout(
           timeout,
           onTimeout: () {
-            abort.complete();
+            if (!abort.isCompleted) abort.complete();
             throw TimeoutException('API request timed out');
           },
         );
@@ -174,12 +188,50 @@ class ApiClient {
         (value['category'] == null || value['category'] is String);
   }
 
+  bool _validActivityClarification(Map<String, dynamic> data) {
+    final clarification = data['clarification'];
+    if (clarification is! Map<String, dynamic> ||
+        clarification['kind'] != 'activity' ||
+        clarification['message'] is! String ||
+        clarification['token'] is! String ||
+        (clarification['token'] as String).isEmpty ||
+        data['travel_request'] is! Map<String, dynamic>) {
+      return false;
+    }
+    final options = clarification['options'];
+    const allowed = {'음식', '카페', '자연·산책', '문화·역사', '체험', '실내 오락'};
+    if (options is! List ||
+        options.isEmpty ||
+        options.length > allowed.length) {
+      return false;
+    }
+    final values = <String>{};
+    for (final option in options) {
+      if (option is! Map<String, dynamic> ||
+          !allowed.contains(option['value']) ||
+          option['label'] is! String ||
+          (option['label'] as String).isEmpty ||
+          !values.add(option['value'] as String)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   bool _validData(String path, dynamic data) {
     if (data is! Map<String, dynamic>) return false;
     if (data['metadata'] != null && data['metadata'] is! Map<String, dynamic>) {
       return false;
     }
     return switch (path) {
+      '/travel/interpret' =>
+        data['clarification_required'] == true
+            ? _validActivityClarification(data)
+            : data['travel_request'] is Map<String, dynamic> &&
+                  data['intent_token'] is String &&
+                  data['target_mode'] is String &&
+                  data['target_count'] is int &&
+                  data['mode_switch_required'] is bool,
       '/suggest/tags' =>
         data['tags'] is List &&
             (data['tags'] as List).every((tag) => tag is String),
@@ -203,10 +255,22 @@ class ApiClient {
 
   Future<Map<String, dynamic>> post(
     String path,
-    Map<String, dynamic> body,
-  ) async {
+    Map<String, dynamic> body, {
+    RequestCancellation? cancellation,
+  }) async {
+    if (cancellation?.isCancelled == true) {
+      return _error('추천 요청을 취소했어요.', 'request_cancelled');
+    }
     try {
-      final response = await _send('POST', Uri.parse('$baseUrl$path'), body);
+      final response = await _send(
+        'POST',
+        Uri.parse('$baseUrl$path'),
+        body,
+        cancellation,
+      );
+      if (cancellation?.isCancelled == true) {
+        return _error('추천 요청을 취소했어요.', 'request_cancelled');
+      }
       final status = response.statusCode;
       final Map<String, dynamic> decoded;
       try {

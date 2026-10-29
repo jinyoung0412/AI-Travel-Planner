@@ -49,7 +49,7 @@ def test_spot_and_course_exclude_flagged_identity_without_renaming(monkeypatch, 
     bad = source[source['place_id'].eq(HOLD_ID)].copy()
     bad['방문자수'] = 100000000
     extras = ensure_ids(pd.DataFrame([{
-        '가게명': name, '주소': f'충남 천안시 테스트로 {i+1}',
+        '가게명': name, '주소': f'충남 천안시 테스트로 {i+1}', '지역': '천안',
         '카테고리': category, 'latitude': 36.8083, 'longitude': 127.1506,
         '방문자수': 1, '블로그수': 0, 'blog_tags': '{}',
     } for i, (name, category) in enumerate([
