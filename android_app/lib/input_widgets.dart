@@ -21,7 +21,9 @@ class _StepDot extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         AnimatedContainer(
-          duration: const Duration(milliseconds: 250),
+          duration: MediaQuery.disableAnimationsOf(context)
+              ? Duration.zero
+              : const Duration(milliseconds: 250),
           width: 30,
           height: 30,
           decoration: BoxDecoration(
@@ -48,6 +50,7 @@ class _StepDot extends StatelessWidget {
         const SizedBox(height: 4),
         Text(
           label,
+          textAlign: TextAlign.center,
           style: TextStyle(
             fontSize: 11,
             color: isActive
@@ -114,6 +117,14 @@ class _ChoicePill extends StatelessWidget {
     selected: selected,
     onSelected: (_) => onTap(),
     showCheckmark: false,
+    chipAnimationStyle: MediaQuery.disableAnimationsOf(context)
+        ? ChipAnimationStyle(
+            enableAnimation: AnimationStyle.noAnimation,
+            selectAnimation: AnimationStyle.noAnimation,
+            avatarDrawerAnimation: AnimationStyle.noAnimation,
+            deleteDrawerAnimation: AnimationStyle.noAnimation,
+          )
+        : null,
     avatar: icon == null
         ? null
         : Icon(icon, size: 16, color: selected ? Colors.white : color),
@@ -132,6 +143,7 @@ class _ChoicePill extends StatelessWidget {
 
 class _TagSection extends StatelessWidget {
   final String title;
+  final bool showTitle;
   final List<String> tags;
   final Set<String> selectedTags;
   final Color themeColor;
@@ -145,6 +157,7 @@ class _TagSection extends StatelessWidget {
     required this.themeColor,
     required this.onToggle,
     this.hint,
+    this.showTitle = true,
   });
 
   @override
@@ -154,37 +167,40 @@ class _TagSection extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Wrap(
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              Text(
-                title,
-                style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: Color(0xFF555555),
-                ),
-              ),
-              if (hint != null) ...[
-                const SizedBox(width: 6),
-                Text(
-                  hint!,
-                  style: const TextStyle(
-                    fontSize: 11,
-                    color: Color(0xFFFF7043),
+          if (showTitle || hint != null) ...[
+            Wrap(
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                if (showTitle)
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF555555),
+                    ),
                   ),
-                ),
+                if (hint != null) ...[
+                  if (showTitle) const SizedBox(width: 6),
+                  Text(
+                    hint!,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: Color(0xFFFF7043),
+                    ),
+                  ),
+                ],
               ],
-            ],
-          ),
-          const SizedBox(height: 10),
+            ),
+            const SizedBox(height: 10),
+          ],
           Wrap(
             spacing: 8,
             runSpacing: 8,
             children: tags.map((tag) {
               final sel = selectedTags.contains(tag);
               return _ChoicePill(
-                label: tag,
+                label: _kActivityTagLabels[tag] ?? tag,
                 selected: sel,
                 color: themeColor,
                 onTap: () => onToggle(tag),
@@ -199,9 +215,14 @@ class _TagSection extends StatelessWidget {
 
 class _SlotChip extends StatelessWidget {
   final String slotType;
+  final int order;
   final VoidCallback onTap;
 
-  const _SlotChip({required this.slotType, required this.onTap});
+  const _SlotChip({
+    required this.slotType,
+    required this.order,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -212,11 +233,11 @@ class _SlotChip extends StatelessWidget {
     final color = style.color;
     return Semantics(
       button: true,
-      label: '활동 $slotType 변경',
+      label: '$order번째 장소, 활동 ${_kSlotLabels[slotType] ?? slotType} 변경',
       child: InkWell(
         onTap: onTap,
         child: Container(
-          width: 76,
+          width: 100,
           padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 6),
           decoration: BoxDecoration(
             color: color.withValues(alpha: 0.08),
@@ -226,18 +247,26 @@ class _SlotChip extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, color: color, size: 24),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    '$order',
+                    style: TextStyle(color: color, fontWeight: FontWeight.bold),
+                  ),
+                  Icon(icon, color: color, size: 24),
+                  Icon(Icons.edit_outlined, color: color, size: 14),
+                ],
+              ),
               const SizedBox(height: 7),
               Text(
-                slotType,
+                _kSlotLabels[slotType] ?? slotType,
                 style: TextStyle(
-                  fontSize: 10,
+                  fontSize: 12,
                   color: color,
                   fontWeight: FontWeight.bold,
                 ),
                 textAlign: TextAlign.center,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
               ),
             ],
           ),
@@ -245,4 +274,40 @@ class _SlotChip extends StatelessWidget {
       ),
     );
   }
+}
+
+class _RecommendationErrorNotice extends StatelessWidget {
+  final String message;
+  const _RecommendationErrorNotice({required this.message});
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    liveRegion: true,
+    child: Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF3E0),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFFFCC80)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            '추천을 완료하지 못했어요',
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF795548),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            message,
+            style: const TextStyle(fontSize: 13, color: Color(0xFF795548)),
+          ),
+        ],
+      ),
+    ),
+  );
 }

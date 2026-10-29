@@ -1,5 +1,6 @@
 """Review regression: a recollection queue is never a complete place catalog."""
 import json
+from blog_evidence import reviewed_tags_post
 import sqlite3
 from pathlib import Path
 
@@ -12,9 +13,10 @@ from Preprocess.RunPreprocess.migrate_place_ids import migrate
 
 def sample_post(place, suffix='old'):
     log_no = {'old': 1, 'new': 2, 'fresh': 3, 'late': 4, 'current': 5, 'stale': 6}[suffix]
-    return {'url': f'https://blog.naver.com/reviewer/{log_no}',
+    value = {'url': f'https://blog.naver.com/reviewer/{log_no}',
             'name_excerpt': f"{place['가게명']} 후기", 'address_excerpt': place['주소'],
             'tags': [f'{suffix}-tag']}
+    return reviewed_tags_post(place, value, value['tags'])
 
 
 def read_places(path):
@@ -116,7 +118,7 @@ def test_new_posts_union_with_old_and_stale_catalog_cannot_undo_update(places):
     old = sample_post(first)
     stale, _ = merge_verified_tags(source, pd.DataFrame([{
         'place_id': first['place_id'], 'blog_tag_status': 'verified', 'verified_posts': json.dumps([old])}]))
-    changed = {**old, 'tags': ['updated-tag']}
+    changed = reviewed_tags_post(first, {**old, 'tags': ['updated-tag']}, ['updated-tag'])
     new = sample_post(first, 'new')
     updated, _ = merge_verified_tags(stale, pd.DataFrame([{
         'place_id': first['place_id'], 'blog_tag_status': 'verified',

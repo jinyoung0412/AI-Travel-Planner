@@ -1,4 +1,3 @@
-import 'package:ai_travel_app/preference_notice.dart';
 import 'package:ai_travel_app/spot_result_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -39,19 +38,21 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  testWidgets('spatial metadata stays internal while place remains visible', (
+    tester,
+  ) async {
+    await mount(tester, {'spatial_relation_limitation': spatial});
+    expect(find.text('주변 거리 조건 미적용'), findsNothing);
+    expect(find.text(spatial), findsNothing);
+    await tester.pumpAndSettle();
+    expect(find.text('주변 거리 조건 안내'), findsNothing);
+    expect(find.text(spatial), findsNothing);
+    expect(find.text(taste), findsNothing);
+    expect(find.text('요청한 카페'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
   testWidgets(
-    'spatial-only metadata is visible without requiring taste-unavailable flag',
-    (tester) async {
-      await mount(tester, {'spatial_relation_limitation': spatial});
-      expect(find.text('주변 거리 조건 안내'), findsOneWidget);
-      expect(find.text(spatial), findsOneWidget);
-      expect(find.text(taste), findsNothing);
-      expect(find.text('요청한 카페'), findsOneWidget);
-      expect(tester.takeException(), isNull);
-    },
-  );
-  testWidgets(
-    'spatial and taste limits coexist with partial-results banner and card indices',
+    'partial results remain usable without spatial or taste diagnostics',
     (tester) async {
       tester.view.physicalSize = const Size(320, 480);
       tester.view.devicePixelRatio = 1;
@@ -67,8 +68,12 @@ void main() {
         requested: 5,
         scale: 1.8,
       );
-      expect(find.text(taste), findsOneWidget);
-      expect(find.text(spatial), findsOneWidget);
+      expect(find.text('취향 일치 미확인'), findsNothing);
+      expect(find.text('주변 거리 조건 미적용'), findsNothing);
+      expect(find.text(taste), findsNothing);
+      await tester.pumpAndSettle();
+      expect(find.text(taste), findsNothing);
+      expect(find.text(spatial), findsNothing);
       await tester.scrollUntilVisible(
         find.text('요청한 카페'),
         150,
@@ -87,8 +92,6 @@ void main() {
           if (value != null) 'spatial_relation_limitation': value,
         };
         await mount(tester, metadata);
-        expect(PreferenceNotice.hasNotice(metadata), false);
-        expect(find.byType(PreferenceNotice), findsNothing);
         expect(find.text('주변 거리 조건 안내'), findsNothing);
         expect(find.text('요청한 카페'), findsOneWidget);
         expect(tester.takeException(), isNull);
@@ -97,7 +100,10 @@ void main() {
         'preference_evidence': 'unavailable',
         'preference_limitation': taste,
       });
-      expect(find.text(taste), findsOneWidget);
+      expect(find.text('취향 일치 미확인'), findsNothing);
+      expect(find.text(taste), findsNothing);
+      await tester.pumpAndSettle();
+      expect(find.text(taste), findsNothing);
       expect(find.text('주변 거리 조건 안내'), findsNothing);
     },
   );

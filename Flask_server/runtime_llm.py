@@ -7,25 +7,33 @@ import time
 
 import anthropic
 import httpx
+from recommender.constants import CORE_ACTIVITY_TAG_SLOTS
 
 log = logging.getLogger(__name__)
 MODEL = os.getenv('ANTHROPIC_MODEL', 'claude-haiku-4-5-20251001')
 _claude = None
 
 
-def _timeout():
-    value = float(os.getenv('LLM_TIMEOUT_SECONDS', '4'))
+def _timeout(default=4):
+    value = float(os.getenv('LLM_TIMEOUT_SECONDS', str(default)))
     if not 0 < value <= 10:
         raise ValueError('LLM_TIMEOUT_SECONDS must be within (0, 10].')
     return value
 
 
-def call_claude(system: str, user_msg: str, max_tokens: int = 512, max_retries: int = 2) -> dict:
+def call_claude(system: str, user_msg: str, max_tokens: int = 512, max_retries: int = 2,
+                *, timeout_seconds: float = 4, compact_selection: bool = False) -> dict:
     """max_retries retains its historical meaning of total attempts, capped at two."""
     global _claude
     if not isinstance(max_retries, int) or isinstance(max_retries, bool) or max_retries < 1:
         raise ValueError('max_retries must be a positive integer.')
-    timeout = _timeout()
+    timeout = _timeout(timeout_seconds)
+    selection_payload = None
+    if compact_selection:
+        import selection_wire
+        selection_payload = json.loads(user_msg)
+        system, user_msg = selection_wire.prepare(selection_payload)
+        max_tokens = min(max_tokens, selection_wire.MAX_OUTPUT_TOKENS)
     if _claude is None:
         key = os.getenv('ANTHROPIC_API_KEY', '').strip()
         if not key:
@@ -40,6 +48,9 @@ def call_claude(system: str, user_msg: str, max_tokens: int = 512, max_retries: 
             response = _claude.messages.create(
                 model=MODEL, max_tokens=max_tokens, system=system,
                 messages=[{'role': 'user', 'content': user_msg}],
+                # A cached client may serve interpretation and candidate selection.
+                # Set the timeout per request; the deployment override takes priority.
+                timeout=httpx.Timeout(timeout, connect=min(2, timeout)),
             )
             if response.stop_reason != 'end_turn':
                 raise ValueError('언어 해석 응답이 완료되지 않았습니다.')
@@ -48,6 +59,14 @@ def call_claude(system: str, user_msg: str, max_tokens: int = 512, max_retries: 
             result = json.loads(fenced.group(1) if fenced else text)
             if not isinstance(result, dict):
                 raise ValueError('언어 해석 응답은 JSON 객체여야 합니다.')
+            if compact_selection:
+                try:
+                    return selection_wire.expand(result, selection_payload)
+                except ValueError as error:
+                    # Local enumerated validation code only; never provider
+                    # text, prompts, credentials or response content.
+                    log.warning('Candidate ordering rejected (%s)', str(error))
+                    raise
             return result
         except (anthropic.APIConnectionError, anthropic.APIStatusError) as exc:
             retryable = isinstance(exc, anthropic.APIConnectionError) or exc.status_code in (429, 500, 502, 503, 504, 529)
@@ -69,6 +88,8 @@ SPOT_CATEGORY_SYSTEM = """\
 - "맥주 박물관"은 ["박물관"]이며 술을 마실 장소 요청과 구분하세요.
 - 일반 "카페"와 목적형 카페를 구분하세요. "보드게임카페"/"보드카페" → ["보드카페"].
 - 키즈카페, 방탈출카페, 라이브카페, 슬라임카페는 명시한 종류만 그대로 반환하며 일반 "카페"로 바꾸지 마세요.
+- 실내 놀거리는 볼링장·PC방·보드게임카페·방탈출·노래방·오락실처럼 놀이 목적 시설입니다. 일반 카페를 추가하지 마세요.
+- "볼링장" → ["볼링"], "PC방"/"피시방" → ["PC방"]. 등산은 산행 장소 요청이며 등산용품/의류 판매점과 구분하세요.
 - "맛집", "밥집", 일반 음식 요청은 ["음식점"]. 구체적인 음식 종류는 그대로 유지.
 - 문화 관람 "전시", "전시회"는 ["전시"]. 명시적인 부동산·모델하우스·견본주택 관람은 ["주택전시관"].
 - 맛있다/좋다 같은 평가나 분위기 형용사를 장소 종류로 반환하지 마세요.
@@ -87,8 +108,7 @@ PERSONA_TAG_GROUPS = {
                 '고급스러운', '아늑한', '이색적인', '자연 친화적', '소소한 일상', '설레는', '멋진 야경'],
     '특별한 날': ['기념일', '생일', '졸업·입학 기념', '프로포즈', '첫 데이트', '오랜만에 만남', '일상 탈출'],
     '실내·야외': ['실내 위주', '야외 위주'],
-    '어떤 활동': ['맛집 탐방', '카페 투어', '문화·역사 탐방', '박물관/전시', '쇼핑', '자연/산책',
-               '등산/트레킹', '사진 명소', '야경', '스포츠/레저', '체험 공방', '전통/한옥', '노래방/실내 오락'],
+    '어떤 활동': list(CORE_ACTIVITY_TAG_SLOTS),
 }
 PERSONA_TAGS = frozenset(tag for tags in PERSONA_TAG_GROUPS.values() for tag in tags)
 TAG_SUGGEST_SYSTEM = (
@@ -96,6 +116,12 @@ TAG_SUGGEST_SYSTEM = (
     '반드시 아래 목록에 있는 태그 문자열 그대로만 사용하세요.\n\n'
     + '\n\n'.join(f"[{group}]\n{', '.join(tags)}" for group, tags in PERSONA_TAG_GROUPS.items())
     + '\n\n관련 있는 태그만 선택. 목록 밖 단어 절대 금지.\nJSON만 반환. 형식: {"tags": [...]}'
+    + '\n분위기 외 그룹은 최대1개. 부정한 항목을 선택하지 마세요. 가족/친구/연인/실내만으로 아이 동반을 추정하지 마세요.'
+    + '\n실내 놀거리(노래방/실내 오락)는 볼링·PC방·보드게임·방탈출·노래방 등 놀이 목적입니다. 일반 카페 휴식과 구분하세요.'
+    + '\n등산·쇼핑 등 세부 목적은 원문에 보존하며 다른 기본활동으로 임의 대체하지 마세요.'
+    + '\n데이트는 첫 데이트와 다릅니다. 첫 데이트 태그는 원문에 첫 데이트라고 명시한 경우만 선택하세요.'
+    + '\n원문에 직접 표현한 내용만 선택하세요. 기념일·데이트·전시만으로 실내 위주·감성적인·로맨틱한 등 분위기를 추정하지 마세요.'
+    + '\n반환 형식은 {"tags":[...],"tag_evidence":{"태그":"원문의 실제 구절"}}입니다. 각 태그마다 직접 의미가 일치하는 짧은 원문 구절을 제시하세요.'
 )
 
 

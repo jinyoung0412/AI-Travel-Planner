@@ -68,7 +68,7 @@ void main() {
   );
 
   testWidgets(
-    'unavailable taste evidence appears in results and saved course detail',
+    'internal metadata survives saving without appearing in results or saved detail',
     (tester) async {
       const notice = '검증 태그가 없어 취향 일치 근거가 없습니다.';
       const metadata = {
@@ -98,7 +98,10 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(find.text(notice), findsOneWidget);
+      expect(find.text('취향 일치 미확인'), findsNothing);
+      expect(find.text(notice), findsNothing);
+      await tester.pumpAndSettle();
+      expect(find.text(notice), findsNothing);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(
         app(
@@ -112,18 +115,23 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(find.text(notice), findsOneWidget);
+      await tester.pumpAndSettle();
+      expect(find.text(notice), findsNothing);
       expect(tester.takeException(), isNull);
       await LocalStorageService.saveCourse('통합 검증', [
         place('canonical'),
       ], metadata: metadata);
+      expect(
+        (await LocalStorageService.getSavedCourses()).single['metadata'],
+        metadata,
+      );
       await tester.pumpWidget(app(const SavedScreen()));
       await tester.pumpAndSettle();
       await tester.tap(find.text('코스 (1)'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('통합 검증'));
       await tester.pumpAndSettle();
-      expect(find.text(notice), findsOneWidget);
+      expect(find.text(notice), findsNothing);
       expect(tester.takeException(), isNull);
     },
   );

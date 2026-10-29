@@ -54,10 +54,7 @@ void main() {
     },
   );
   test('distance notice only shows finite nonnegative estimates', () {
-    expect(
-      distanceNotice({'estimated_distance_km': '1.25'}),
-      contains('1.3km (직선거리 추정)'),
-    );
+    expect(distanceNotice({'estimated_distance_km': '1.25'}), '직선거리 약 1.3 km');
     for (final value in [null, 'bad', double.nan, -1]) {
       expect(
         distanceNotice({'estimated_distance_km': value}),
@@ -85,7 +82,7 @@ void main() {
             {'estimated_distance_km': 1.2},
             places: [place.toJson()],
           ),
-          contains('실제 장소 위치와 다를 수 있어요'),
+          '직선거리 약 1.2 km',
         );
       }
       for (final quality in [

@@ -10,6 +10,7 @@ from place_identity import ensure_ids
 from place_quality import filter_coordinate_candidates
 from recommender.diversity import BRAND_SOURCE_NAMES, brand_family, select_diverse_spots
 from recommender.visits import distinct_visits
+from recommender.constants import CAFE_CATS
 
 
 ORIGIN = {'user_lat': 36.8082, 'user_lng': 127.1506, 'transport': '대중교통'}
@@ -70,7 +71,7 @@ def test_count_backfill_and_real_shortage_metadata(monkeypatch, count, returned,
     assert metadata['verified_tag_candidate_count'] == 0
     assert metadata['preference_evidence'] == 'unavailable'
     assert metadata['category_preference_tags_applied'] == ['카페 투어']
-    assert '활동 태그(카페 투어)는 장소 종류에 반영' in metadata['preference_limitation']
+    assert '활동 태그(카페·디저트)는 장소 종류에 반영' in metadata['preference_limitation']
     assert '동행·분위기를 포함한 취향 일치 근거는 없습니다' in metadata['preference_limitation']
 
 
@@ -109,19 +110,21 @@ def test_diversity_backfill_cannot_restore_filtered_places(monkeypatch):
     assert metadata['constraints_relaxed'] == []
 
 
-# Generic cafe policy now excludes explicit entertainment-purpose cafe kinds
-# (and clear board-cafe name evidence), so these pools shrink by 29 / 20.
-@pytest.mark.parametrize('transport,expected_pool', [('차', 1790), ('대중교통', 957)])
+# The six-activity policy uses cafe/coffee/dessert categories consistently for
+# the cafe tag and slot. Preserve the narrower historical pool as a reference.
+@pytest.mark.parametrize('transport,legacy_pool,expected_pool', [('차', 1790, 1813), ('대중교통', 957, 972)])
 @pytest.mark.parametrize('count', [5, 10])
-def test_frozen_db_station_cafe_variety_and_repeatability(monkeypatch, transport, expected_pool, count):
+def test_frozen_db_station_cafe_variety_and_repeatability(monkeypatch, transport, legacy_pool, expected_pool, count):
     path = Path(app.__file__).with_name('places.db')
     before = hashlib.sha256(path.read_bytes()).hexdigest()
     assert before == DB_SHA
     monkeypatch.setattr(app, 'DB_PATH', str(path))
     original = app.get_df()
     eligible, quality = filter_coordinate_candidates(original)
-    pool = app.filter_keywords(app.filter_radius(eligible, ORIGIN['user_lat'], ORIGIN['user_lng'],
-                                               transport), ['카페', '베이커리'], [])
+    near = app.filter_radius(eligible, ORIGIN['user_lat'], ORIGIN['user_lng'], transport)
+    assert len(app.filter_keywords(near, ['카페', '베이커리'], [])) == legacy_pool
+    assert app.derive_category_from_tags(['카페 투어']) == CAFE_CATS
+    pool = app.filter_keywords(near, CAFE_CATS, [])
     ranked = app.add_scores(pool, []).sort_values(['score', 'origin_distance_km', 'place_id'],
                                                 ascending=[False, True, True])
     baseline = distinct_visits(ranked).head(count)
@@ -143,7 +146,9 @@ def test_frozen_db_station_cafe_variety_and_repeatability(monkeypatch, transport
     assert sum(p['source_name'] in BRAND_SOURCE_NAMES['뚜쥬루'] for p in places) == 1
     metadata = first.json['metadata']
     assert metadata['returned_count'] == metadata['requested_count'] == count
-    assert metadata['diversity']['distinct_candidate_count'] == expected_pool
+    service_pool, _ = app.filter_service_candidates(pool)
+    assert metadata['diversity']['distinct_candidate_count'] == len(service_pool)
+    assert len(service_pool) == (1799 if transport == '차' else expected_pool)
     assert metadata['diversity']['known_brand_candidate_count'] == 4
     assert metadata['diversity']['repeated_brand_backfill_count'] == 0
     assert metadata['constraints_relaxed'] == []

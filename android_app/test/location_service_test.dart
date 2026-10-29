@@ -235,6 +235,7 @@ void main() {
         'flutter.baseflow.com/geolocator_updates_android',
       );
       final calls = <String>[];
+      final secondListen = Completer<void>();
       final messenger =
           TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
       messenger.setMockMethodCallHandler(methods, (call) async {
@@ -244,13 +245,17 @@ void main() {
       });
       messenger.setMockMethodCallHandler(events, (call) async {
         calls.add(call.method);
+        if (call.method == 'listen' &&
+            calls.where((name) => name == 'listen').length == 2) {
+          secondListen.complete();
+        }
         return null;
       });
       addTearDown(() => messenger.setMockMethodCallHandler(methods, null));
       addTearDown(() => messenger.setMockMethodCallHandler(events, null));
       GeolocatorAndroid.registerWith();
       final source = DeviceLocationSource(
-        timeout: const Duration(milliseconds: 20),
+        timeout: const Duration(milliseconds: 200),
       );
       await expectLater(
         source.locate(),
@@ -258,12 +263,18 @@ void main() {
       );
       await Future<void>.delayed(Duration.zero);
       expect(calls, ['listen', 'cancel']);
+      // Explicit cancellation is a separate case from the short timeout.
+      // Wait for the native listen handshake instead of racing a 20 ms timer
+      // against an event-loop yield on a busy test host.
+      final leavingSource = DeviceLocationSource(
+        timeout: const Duration(seconds: 5),
+      );
       final pending = expectLater(
-        source.locate(),
+        leavingSource.locate(),
         throwsA(failure(LocationFailure.cancelled)),
       );
-      await Future<void>.delayed(Duration.zero);
-      await source.cancel();
+      await secondListen.future;
+      await leavingSource.cancel();
       await pending;
       await Future<void>.delayed(Duration.zero);
       expect(calls, ['listen', 'cancel', 'listen', 'cancel']);

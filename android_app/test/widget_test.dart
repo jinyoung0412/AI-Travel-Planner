@@ -55,7 +55,8 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(find.textContaining('직선거리 추정'), findsOneWidget);
+      expect(find.textContaining('직선거리 추정'), findsNothing);
+      expect(find.text('약 1.2 km'), findsOneWidget);
       await tester.tap(find.byIcon(Icons.bookmark_outline_rounded));
       await tester.pumpAndSettle();
       final raw = (await SharedPreferences.getInstance()).getString(

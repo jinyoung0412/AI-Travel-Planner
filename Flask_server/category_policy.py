@@ -1,7 +1,9 @@
 """Validated category intent and shared spot/course domain boundaries."""
 import re
+import unicodedata
 
-from recommender.constants import FOOD_CATS, CAFE_CATS, SPECIALIZED_CAFE_CATS
+from recommender.constants import (FOOD_CATS, CAFE_CATS, SPECIALIZED_CAFE_CATS,
+                                  CORE_ACTIVITY_LABELS, SLOT_CATEGORY_MAP, CRAFT_CATS)
 
 FOOD_BEVERAGE_CATS = [
     '한식', '중식', '일식', '양식', '고기', '닭갈비', '해산물',
@@ -24,14 +26,73 @@ ALIASES = {
        ('맥주', '맥주집', '맥줏집', '맥주전문점', '맥주 전문점', '호프집', '펍')},
     '보드게임카페': ['보드카페'], '보드게임 카페': ['보드카페'],
     '보드 게임 카페': ['보드카페'],
+    **{term: [term] for term in SPECIALIZED_CAFE_CATS},
     **{term[:-2] + ' 카페': [term] for term in SPECIALIZED_CAFE_CATS},
+    **{label: SLOT_CATEGORY_MAP[slot] for slot, label in CORE_ACTIVITY_LABELS.items()
+       if label != slot},
+    '체험': SLOT_CATEGORY_MAP['체험'], '만들기': SLOT_CATEGORY_MAP['체험'],
+    '등산': SLOT_CATEGORY_MAP['등산'],
+    **{term: ['PC방'] for term in ('pc방', '피시방', '피씨방', 'PC 방', '피시 방', '피씨 방')},
 }
 NEGATION = r'말고|제외|빼고|아닌|아니|않|싫|없이|없는|말아|대신|원치|안\s*(?:가|갈|좋|먹|원)|싶지'
 SPATIAL_RELATION = r'근처|주변|인근|부근|옆|가까운'
 
+# Provider category leaves describe purpose. Match approved forms, not brand
+# names or incidental character sequences (e.g. 국가유산청 / 스포츠의류).
+PLAY_LEAVES = {
+    '노래방': {'노래방', '노래연습장', '코인노래방', '코인노래연습장'},
+    '볼링': {'볼링', '볼링장'},
+    '오락': {'오락', '오락실', '전자오락실', '게임장', '아케이드'},
+    'pc방': {'pc방', '피시방', '피씨방', '인터넷게임방'},
+    '실내놀이터': {'실내놀이터'},
+}
+HIKING_TERMS = {'산', '등산', '등산로', '트레킹', '트레킹코스'}
+SPORT_TERMS = {'스포츠', '레저', '수영', '볼링', '클라이밍', '체육', '경기장', '골프', '테니스'}
+
+
+def _normalized(value):
+    return re.sub(r'\s+', '', unicodedata.normalize('NFKC', str(value or ''))).casefold()
+
+
+def _category_leaves(category):
+    return {_normalized(v) for v in re.split(r'[,>/]+', str(category or '')) if v.strip()}
+
+
+def _sports_retail(category):
+    if any(_normalized(path) == '등산,아웃도어' for path in re.split(r'[>/]+', str(category or ''))):
+        return True
+    return any(re.fullmatch(r'(?:등산|아웃도어|스포츠|골프|테니스|수영)(?:용품|의류)(?:점|판매점|전문점)?', leaf)
+               for leaf in _category_leaves(category))
+
+
+def _play_matches(category, term):
+    leaves = _category_leaves(category)
+    # This provider's broad compound label includes outdoor sports, too. It is
+    # not evidence of an indoor game facility without a concrete purpose leaf.
+    if term == '오락':
+        labels = {_normalized(path) for path in re.split(r'[>/]+', str(category or ''))}
+        specific = PLAY_LEAVES[term] - {'오락'}
+        return bool(labels.intersection(PLAY_LEAVES[term]) or leaves.intersection(specific))
+    return bool(leaves.intersection(PLAY_LEAVES[term]))
+
 
 def concrete_food_terms(filters):
     return [term for term in filters if term in FOOD_BEVERAGE_CATS and term not in GENERIC_FOOD_TERMS]
+
+
+def filters_for_activity(filters, activity_filters):
+    """Retain source kinds that belong to an activity, without broadening them.
+
+    A meal activity is a parent purpose of specific meals such as pasta/salad,
+    even when those exact leaves are absent from its default search list.
+    Drinks and purpose cafes remain separate activities under the existing
+    category policy. This relation never changes candidate category matching.
+    """
+    meal_kinds = set(FOOD_BEVERAGE_CATS) - set(CAFE_CATS) - {
+        '술집', '맥주', '호프', '아이스크림', '주스', '차(음료)', '바(Bar)', '포차', '막걸리'}
+    meal_activity = bool(set(activity_filters).intersection(GENERIC_FOOD_TERMS))
+    return [term for term in filters if term in activity_filters or
+            category_matches(term, activity_filters) or (meal_activity and term in meal_kinds)]
 
 
 def directly_excluded(tail):
@@ -50,16 +111,30 @@ def landmark_suffix(tail):
     return bool(re.match(r'\s*(?:(?:의\s*)?(?:근처|주변|옆|인근|부근)|에서\s*가까운)', tail))
 
 
-def normalize_filters(filters, known):
+def generic_food_modifier(term, concrete, text):
+    """Narrow only an observed adjacent type modifier, never an absent OR word.
+
+    Category arrays are unions. Adjectives between alternatives ("음식점 또는
+    조용한 카페") cannot be evidence to delete one alternative.
+    """
+    if not text or term not in GENERIC_FOOD_TERMS or not concrete:
+        return False
+    occurrences = list(re.finditer(re.escape(term), text))
+    return bool(occurrences) and all(any(
+        re.search(re.escape(kind) + r'\s*$', text[:m.start()]) or
+        re.match(r'\s*' + re.escape(kind), text[m.end():])
+        for kind in concrete) for m in occurrences)
+
+
+def normalize_filters(filters, known, *, text=None):
     allowed = set(known) | {'주택전시관'}
     unknown = [term for term in filters if term not in allowed and term not in ALIASES]
     if unknown:
         raise ValueError('unsupported_category')
-    # A concrete food request must never expand to every restaurant.
     concrete = concrete_food_terms(filters)
     result = []
     for term in filters:
-        if concrete and term in GENERIC_FOOD_TERMS:
+        if generic_food_modifier(term, concrete, text):
             continue
         result.extend(ALIASES.get(term, [term]))
     return list(dict.fromkeys(result))
@@ -104,6 +179,23 @@ def category_matches(category, filters, name=''):
                 continue
             if term == cafe_kind:
                 return True
+        if term in HIKING_TERMS | SPORT_TERMS and _sports_retail(category):
+            continue
+        if term in PLAY_LEAVES:
+            if _play_matches(category, term):
+                return True
+            continue
+        if term in CRAFT_CATS:
+            labels = _category_leaves(category) | {_normalized(path) for path in re.split(r'[>/]+', value)}
+            if _normalized(term) in labels:
+                return True
+            continue
+        if term == '국가유산':
+            if '국가유산' in _category_leaves(category):
+                return True
+            continue
+        if term == '전통' and '전통,민속주점' == _normalized(category):
+            continue
         if term == '산':
             if '산' in tokens:
                 return True

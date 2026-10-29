@@ -12,7 +12,7 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 from Flask_server.recommender.constants import (FOOD_CATS, CAFE_CATS, ACTIVITY_CATS,
-                                               SLOT_CATEGORY_MAP, RADIUS_KM)
+                                               SLOT_CATEGORY_MAP, RADIUS_KM, DEFAULT_COURSE_SLOTS)
 from Flask_server.recommender.scoring import add_scores
 from Flask_server.recommender.geometry import distances_from, route_metrics, greedy_tsp
 from Flask_server.recommender.search import search_courses
@@ -27,7 +27,7 @@ def generate_from_slots(df, slot_types, blog_tag_keywords, filter_fn, n=3,
 def fixed_categories(spots):
     if spots not in (3, 4, 5):
         raise ValueError('spot_count는 3~5이어야 합니다.')
-    return [FOOD_CATS, ACTIVITY_CATS, CAFE_CATS, ACTIVITY_CATS, FOOD_CATS][:spots]
+    return [SLOT_CATEGORY_MAP[slot] for slot in DEFAULT_COURSE_SLOTS[:spots]]
 
 
 def generate_fixed_courses(df, blog_tag_keywords, filter_fn, n=3, spots=5,

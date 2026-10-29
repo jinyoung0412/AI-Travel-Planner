@@ -1,5 +1,6 @@
 """Offline regressions for identities, evidence and publication failures."""
 import json
+from blog_evidence import reviewed_tags_post
 import sqlite3
 from pathlib import Path
 
@@ -12,8 +13,12 @@ from Preprocess.RunPreprocess.build_database import build, merge_verified_tags, 
 
 
 def proof(place, url='https://blog.naver.com/reviewer/123', tags=None):
-    return {'url': url, 'name_excerpt': place['가게명'] + ' 후기',
+    value = {'url': url, 'name_excerpt': place['가게명'] + ' 후기',
             'address_excerpt': place['주소'], 'tags': tags or ['valid']}
+    try:
+        return reviewed_tags_post(place, value, value['tags'])
+    except ValueError:
+        return value  # Deliberately malformed evidence fixtures remain unreviewed.
 
 
 def verified(place, posts):

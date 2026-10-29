@@ -1,5 +1,6 @@
 """Contracts shared by independently refactored collection, data and APIs."""
 import json
+from blog_evidence import reviewed_tags_post
 
 import pandas as pd
 
@@ -14,6 +15,7 @@ def test_pipeline_preserves_duplicate_coordinates_and_post_evidence(tmp_path, pl
     first = ensure_ids(places.head(1)).iloc[0].to_dict()
     post = {'url': 'https://blog.naver.com/reviewer/123', 'name_excerpt': first['가게명'] + ' 후기',
             'address_excerpt': first['주소'], 'tags': ['조용한']}
+    post = reviewed_tags_post(first, post, post['tags'])
     first.update(blog_tag_status='verified', verified_posts=json.dumps([post]), category_source='provider')
     latest = {**first, 'latitude': None, 'longitude': None, 'verified_posts': '[]',
               'blog_tag_status': 'fetch_error', '방문자수': 999}

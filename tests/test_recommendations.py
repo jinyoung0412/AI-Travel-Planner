@@ -44,9 +44,11 @@ def test_more_courses_than_clusters_and_repeatability(places):
 
 
 def test_fixed_count_not_limited_by_cluster(places):
-    courses = generate_fixed_courses(places, [], app.filter_keywords, n=5, spots=5, start=ORIGIN)
+    p = places.copy()
+    p.loc[p.index[3::6], '카테고리'] = '박물관'
+    courses = generate_fixed_courses(p, [], app.filter_keywords, n=5, spots=5, start=ORIGIN)
     assert len(courses) == 5
-    assert all([p['카테고리'] for p in c] == ['한식', '공원', '카페', '공원', '한식'] for c in courses)
+    assert all([p['카테고리'] for p in c] == ['한식', '공원', '카페', '박물관', '한식'] for c in courses)
 
 
 def test_same_name_different_addresses_allowed(places):
