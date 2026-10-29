@@ -87,14 +87,20 @@ class HomeScreen extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const SizedBox(height: 16),
-            const Text(
-              '오늘 충남',
-              style: TextStyle(
-                fontSize: 28,
-                fontWeight: FontWeight.w900,
-                color: Color(0xFFFF7043),
-                letterSpacing: -0.5,
-              ),
+            Row(
+              children: [
+                const Expanded(
+                  child: Text(
+                    '오늘 충남',
+                    style: TextStyle(
+                      fontSize: 28,
+                      fontWeight: FontWeight.w900,
+                      color: Color(0xFFFF7043),
+                      letterSpacing: -0.5,
+                    ),
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 6),
             const Text(

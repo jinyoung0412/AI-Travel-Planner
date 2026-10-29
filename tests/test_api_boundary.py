@@ -43,6 +43,19 @@ def test_suggestion_schema_and_allowlist(client, monkeypatch):
         assert failed.json['reason'] == 'tags_unavailable'
 
 
+@pytest.mark.parametrize('text,expected', [
+    ('연인이랑 데이트 할 곳을 찾고있어요', ['연인과']),
+    ('연인이랑 첫 데이트 할 곳', ['연인과', '첫 데이트']),
+    ('첫 데이트 말고 평소처럼 데이트', []),
+    ('a first date', ['첫 데이트']),
+])
+def test_first_date_suggestion_requires_explicit_source_evidence(client, monkeypatch, text, expected):
+    monkeypatch.setattr(app, '_call_claude', lambda *a: {'tags': ['연인과', '첫 데이트']})
+    response = client.post('/suggest/tags', json={'user_text': text})
+    assert response.status_code == 200
+    assert response.json['tags'] == expected
+
+
 def test_missing_model_is_service_failure_without_exception_text(client, monkeypatch):
     def fail(*args):
         raise RuntimeError('secret-key-private-host')
@@ -143,10 +156,10 @@ def test_course_evidence_filter_does_not_change_engine_scoring_pool(client, plac
     p['blog_tag_status'] = ['legacy_unverified'] * 3 + ['verified']
     monkeypatch.setattr(app, 'get_df', lambda region: p)
     original = app.search_courses
-    def search(df, *args):
+    def search(df, *args, **kwargs):
         # The engine normalizes popularity over the full radius pool. Preserve it.
         assert '주차장' in df['카테고리'].tolist()
-        return original(df, *args)
+        return original(df, *args, **kwargs)
     monkeypatch.setattr(app, 'search_courses', search)
     response = client.post('/recommend/course', json={**ORIGIN, 'slot_types': SLOTS,
                                                      'persona_tags': ['조용한']})
@@ -215,3 +228,43 @@ def test_real_database_read_leaves_bytes_unchanged(monkeypatch):
     # Legacy quarantined evidence is always cleared in memory, never reactivated.
     unverified = df['blog_tag_status'].ne('verified')
     assert df.loc[unverified, 'blog_tags'].eq('{}').all()
+
+
+@pytest.mark.parametrize('text', ['음식점 또는 카페', '음식점이나 카페', '음식점/카페',
+    '음식점 또는 조용한 카페', '음식점이나 가까운 카페'])
+def test_explicit_category_alternatives_preserve_generic_food(text):
+    filters = app.extract_spot_category(text)
+    assert '한식' in filters and '카페' in filters
+
+
+def test_alternative_transport_does_not_broaden_specific_food():
+    assert app.extract_spot_category('차 또는 대중교통으로 닭갈비 음식점') == ['닭갈비']
+
+
+def test_explicit_search_fallback_cannot_supply_actual_category(places):
+    p = ensure_ids(places.head(3))
+    p['카테고리'] = ['카페', '', '카페']
+    p['search_category'] = '카페'
+    p['category_source'] = ['search_fallback', 'search_fallback', 'legacy_unknown']
+    assert app.filter_keywords(p, ['카페'], [])['place_id'].tolist() == [p.iloc[2]['place_id']]
+    assert app.filter_keywords(p.drop(columns='category_source'), ['카페'], [])['place_id'].tolist() == p['place_id'].tolist()
+
+
+
+def test_modified_food_keeps_specific_purpose_when_another_alternative_exists():
+    assert set(app.extract_spot_category('닭갈비 음식점 또는 카페')) == {'닭갈비', '카페'}
+
+
+@pytest.mark.parametrize('text', ['음식점 한식', '음식점한식', '한식 음식점'])
+def test_adjacent_specific_food_modifier_keeps_narrow_scope_in_either_order(text):
+    assert app.extract_spot_category(text) == ['한식']
+
+
+@pytest.mark.parametrize('text,expected', [
+    ('닭갈비 맛집이나 카페', {'닭갈비','카페'}),
+    ('맛집이든 카페든', set(app.FOOD_CATS) | {'카페'}),
+    ('맛집이든지 카페', set(app.FOOD_CATS) | {'카페'}),
+    ('식당이랑 카페', set(app.FOOD_CATS) | {'카페'}),
+])
+def test_alternative_connectors_do_not_need_an_exhaustive_allowlist(text, expected):
+    assert set(app.extract_spot_category(text)) == expected

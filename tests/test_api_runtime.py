@@ -94,3 +94,31 @@ def test_timeout_retries_once_then_succeeds(monkeypatch):
 def test_invalid_attempt_count_does_not_enter_retry_loop(attempts):
     with pytest.raises(ValueError):
         runtime_llm.call_claude('s', 'u', max_retries=attempts)
+
+
+@pytest.mark.parametrize('override,expected', [(None, [4, 8, 4]), ('3', [3, 3, 3]), ('10', [10, 10, 10])])
+def test_selection_timeout_is_per_request_on_cached_client_and_respects_override(monkeypatch, override, expected):
+    create = Mock(return_value=response())
+    factory = Mock(return_value=SimpleNamespace(messages=SimpleNamespace(create=create)))
+    monkeypatch.setattr(anthropic, 'Anthropic', factory)
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'mock-key')
+    if override is not None:
+        monkeypatch.setenv('LLM_TIMEOUT_SECONDS', override)
+    runtime_llm.call_claude('interpret', 'u', max_retries=1)
+    runtime_llm.call_claude('select', 'u', max_retries=1, timeout_seconds=8)
+    runtime_llm.call_claude('interpret', 'u', max_retries=1)
+    factory.assert_called_once()
+    assert factory.call_args.kwargs['max_retries'] == 0
+    assert [call.kwargs['timeout'].read for call in create.call_args_list] == expected
+    assert all(call.kwargs['timeout'].connect == 2 for call in create.call_args_list)
+
+
+def test_selection_timeout_keeps_ten_second_cap_and_single_attempt(monkeypatch):
+    create = Mock(side_effect=anthropic.APITimeoutError(request=httpx.Request('POST', 'https://mock.invalid')))
+    monkeypatch.setattr(runtime_llm, '_claude', SimpleNamespace(messages=SimpleNamespace(create=create)))
+    with pytest.raises(ValueError):
+        runtime_llm.call_claude('s', 'u', max_retries=1, timeout_seconds=11)
+    create.assert_not_called()
+    with pytest.raises(anthropic.APITimeoutError):
+        runtime_llm.call_claude('s', 'u', max_retries=1, timeout_seconds=8)
+    assert create.call_count == 1

@@ -27,8 +27,11 @@ def migrate(db_path, output_dir, apply=False):
                                         for a in ambiguous[unproven & has_tags]]
     audit = _audit_frame(quarantine)
     places.loc[unproven, 'blog_tags'] = '{}'
-    places.loc[unproven, 'blog_tag_status'] = 'legacy_unverified'
-    places.loc[unproven & ambiguous, 'blog_tag_status'] = 'ambiguous_legacy'
+    # Migration must not turn modern retry/review states into legacy labels.
+    # Only genuinely unlabeled historical rows receive a legacy status.
+    missing_status = places.get('blog_tag_status', pd.Series('', index=places.index)).fillna('').map(normalize).eq('')
+    places.loc[unproven & missing_status, 'blog_tag_status'] = 'legacy_unverified'
+    places.loc[unproven & missing_status & ambiguous, 'blog_tag_status'] = 'ambiguous_legacy'
     places['verified_posts'] = places.get('verified_posts', '[]')
     # Retained verified rows must still satisfy the current identity rules.
     # Revalidation also preserves valid posts from mixed valid/invalid evidence.

@@ -17,13 +17,16 @@ from .constants import RADIUS_KM
 from .geometry import distances_from
 from .scoring import add_scores
 from .visits import distinct_visits, visit_groups
+from . import course_variety
+from .disjoint_courses import allocate
+from . import route_coherence
+from recommendation_context import context_cost
 
 MAX_SLOTS = 16
 MAX_COURSES = 100
 MAX_BEAM_WIDTH = 1024
 EXACT_COMBINATIONS = 4096
 BEAM_DISTANCE_BUDGET = 4_000_000
-DIVERSITY_PENALTY = 0.08
 
 
 def _tie(seed, ids):
@@ -32,19 +35,32 @@ def _tie(seed, ids):
 
 def _matching(pools, used=frozenset()):
     """Return a distinct visit key per remaining slot, or prove Hall infeasibility."""
+    from collections import deque
     owner, assigned = {}, [None] * len(pools)
-
-    def assign(slot, seen):
-        for pid in pools[slot]:
-            if pid in used or pid in seen:
-                continue
-            seen.add(pid)
-            if pid not in owner or assign(owner[pid], seen):
-                owner[pid], assigned[slot] = slot, pid
-                return True
-        return False
-
-    return tuple(assigned) if all(assign(i, set()) for i in range(len(pools))) else None
+    for root in range(len(pools)):
+        queue, parent, visited = deque([root]), {}, {root}
+        free = None
+        while queue and free is None:
+            slot = queue.popleft()
+            for pid in pools[slot]:
+                if pid in used or pid in parent:
+                    continue
+                parent[pid] = slot
+                if pid not in owner:
+                    free = pid
+                    break
+                other = owner[pid]
+                if other not in visited:
+                    visited.add(other)
+                    queue.append(other)
+        if free is None:
+            return None
+        while free is not None:
+            slot = parent[free]
+            previous = assigned[slot]
+            owner[free], assigned[slot] = slot, free
+            free = previous
+    return tuple(assigned)
 
 
 def _validate(categories, n, start, transport, seed, beam_width):
@@ -75,25 +91,14 @@ def _validate(categories, n, start, transport, seed, beam_width):
     return True
 
 
-def _select(complete, n, seed, groups):
-    selected, selected_ids = [], []
-    options = list(complete.values())
-    while options and len(selected) < n:
-        def rank(item):
-            cost, path = item
-            visit_ids = [groups[p['place_id']] for p in path]
-            ids = set(visit_ids)
-            overlap = max((len(ids & previous) / len(path) for previous in selected_ids), default=0)
-            return cost + DIVERSITY_PENALTY * overlap, _tie(seed, visit_ids)
-        best = min(options, key=rank)
-        options.remove(best)
-        selected.append(best[1])
-        selected_ids.append({groups[p['place_id']] for p in best[1]})
-    return selected
+def _select(complete, n, seed, groups, randomize=False, recent_place_ids=()):
+    return course_variety.select(complete, n, seed, groups, randomize, recent_place_ids)
 
 
 def search_courses(df, categories, tags, filter_fn, n=3, start=None,
-                   transport='대중교통', seed=0, beam_width=256):
+                   transport='대중교통', seed=0, beam_width=256, randomize=False, recent_place_ids=()):
+    if type(randomize) is not bool:
+        raise ValueError('randomize는 참 또는 거짓이어야 합니다.')
     if not _validate(categories, n, start, transport, seed, beam_width):
         return [], {'reason': 'invalid_slots', 'constraints_relaxed': []}
     clean = df.copy()
@@ -125,15 +130,18 @@ def search_courses(df, categories, tags, filter_fn, n=3, start=None,
     if start is None:
         start = tuple(clean[['latitude', 'longitude']].mean())
     coords = [np.array([(p['latitude'], p['longitude']) for p in pool]) for pool in pools]
-    penalties = [1 - np.array([p['score'] for p in pool]) for pool in pools]
+    penalties = [1 - np.array([p['score'] for p in pool]) +
+                 np.array([context_cost(p) for p in pool]) for pool in pools]
     ties = [np.array([_tie(seed, [pid]) for pid in ids]) for ids in pool_ids]
     radius = RADIUS_KM[transport]
     stats = {'distance_evaluations': 0, 'beam_expansions': 0, 'completion_prefixes': 0,
              'completion_matching_checks': 0, 'beam_distance_evaluations': 0}
 
-    def local_cost(slot, last):
+    def local_cost(slot, last, path=()):
         stats['distance_evaluations'] += sizes[slot]
-        return distances_from(last, coords[slot]) / radius + penalties[slot]
+        prefix = [start] + [(row['latitude'], row['longitude']) for row in path]
+        return (distances_from(last, coords[slot]) / radius + penalties[slot] +
+                route_coherence.extension(prefix, coords[slot], transport))
 
     def save(path, cost):
         complete[tuple(groups[p['place_id']] for p in path)] = (cost / len(pools), path)
@@ -149,7 +157,9 @@ def search_courses(df, categories, tags, filter_fn, n=3, start=None,
             last, cost, path = start, 0.0, []
             for slot, idx in enumerate(indices):
                 stats['distance_evaluations'] += 1
-                cost += float(distances_from(last, [coords[slot][idx]])[0] / radius + penalties[slot][idx])
+                prefix = [start] + [(row['latitude'], row['longitude']) for row in path]
+                cost += float(distances_from(last, [coords[slot][idx]])[0] / radius + penalties[slot][idx] +
+                              route_coherence.extension(prefix, [coords[slot][idx]], transport)[0])
                 path.append(pools[slot][idx])
                 last = coords[slot][idx]
             save(path, cost)
@@ -163,7 +173,7 @@ def search_courses(df, categories, tags, filter_fn, n=3, start=None,
         for slot, pool in enumerate(pools):
             def expansions():
                 for cost, path, used, last in states:
-                    local = local_cost(slot, last)
+                    local = local_cost(slot, last, path)
                     valid = np.array([pid not in used for pid in pool_ids[slot]])
                     ordered = np.lexsort((ties[slot], local))
                     take = width if slot == 0 else min(width, max(32, int(n) * 4))
@@ -173,8 +183,28 @@ def search_courses(df, categories, tags, filter_fn, n=3, start=None,
                         yield (cost + float(local[idx]), path + [place],
                                used | {groups[place['place_id']]}, coords[slot][idx])
             # Keep only width states in memory, even with large n/beam settings.
-            next_states = heapq.nsmallest(width, expansions(),
-                                         key=lambda s: (s[0], _tie(seed, [groups[p['place_id']] for p in s[1]])))
+            def state_key(state):
+                return state[0], _tie(seed, [groups[p['place_id']] for p in state[1]])
+
+            # Reserve room for different earlier visits: a popular prefix must
+            # not consume the whole beam with only its last cafe changing.
+            prefixes = {}
+            def diverse_expansions():
+                for state in expansions():
+                    prefix = tuple(groups[p['place_id']] for p in state[1][:-1])
+                    if prefix not in prefixes or state_key(state) < state_key(prefixes[prefix]):
+                        prefixes[prefix] = state
+                    yield state
+            next_states = heapq.nsmallest(width, diverse_expansions(), key=state_key)
+            if n > 1 and len(prefixes) > 1:
+                reserved = heapq.nsmallest(width // 2, prefixes.values(), key=state_key)
+                primary = next_states[:width - len(reserved)]
+                seen = {tuple(groups[p['place_id']] for p in state[1]) for state in primary}
+                for state in reserved + next_states:
+                    ids = tuple(groups[p['place_id']] for p in state[1])
+                    if ids not in seen and len(primary) < width:
+                        primary.append(state); seen.add(ids)
+                next_states = primary
             states = next_states
             if not states:
                 break
@@ -188,7 +218,7 @@ def search_courses(df, categories, tags, filter_fn, n=3, start=None,
             if slot == len(pools):
                 save(path, cost)
                 return
-            local = local_cost(slot, last)
+            local = local_cost(slot, last, path)
             future = set(assignment[1:])
             for idx in np.lexsort((ties[slot], local)):
                 place = pools[slot][int(idx)]
@@ -213,8 +243,31 @@ def search_courses(df, categories, tags, filter_fn, n=3, start=None,
             visit(0, [], frozenset(), start, 0.0, witness)
             exhaustive = len(complete) < n
 
-    selected = _select(complete, n, seed, groups)
+    selected = _select(complete, n, seed, groups, randomize, recent_place_ids)
+    allocation = {}
+    if len(selected) > 1:
+        selected, allocation = allocate(pools, len(selected), groups, _matching,
+            local_cost, start, seed, randomize, recent_place_ids, complete, transport)
+    from .route_refinement import improve
+    selected, refinement = improve(selected, pools, groups, start, transport, recent_place_ids, randomize)
+    for path in selected:
+        complete[tuple(groups[p['place_id']] for p in path)] = (
+            route_coherence.route_cost(path, start, transport), path)
+    best_cost = min(cost for cost, _ in complete.values()) if complete else None
+    selected_keys = {tuple(groups[p['place_id']] for p in path) for path in selected}
+    selected_costs = [cost for key, (cost, _) in complete.items() if key in selected_keys]
     info.update(reason=None if len(selected) == n else 'insufficient_unique_courses',
                 returned_count=len(selected), candidate_space_exhausted=exhaustive,
-                search_stats=stats)
+                search_stats=stats, best_route_cost=best_cost,
+                route_coherence={**route_coherence.metadata(selected, start, transport), **refinement},
+                quality_limit=(max(best_cost + course_variety.QUALITY_WINDOW, max(selected_costs))
+                               if selected_costs else None),
+                course_diversity={**course_variety.course_summary(selected, groups, randomize),
+                                  **allocation})
+    recent = {groups.get(pid, pid) for pid in recent_place_ids}
+    selected_ids = {groups[p['place_id']] for path in selected for p in path}
+    info['recommendation_variation'] = dict(policy='recent_visits_within_quality_window_v1',
+        recent_count=len(recent), repeated_count=len(selected_ids & recent),
+        new_count=len(selected_ids - recent), evaluated_route_count=len(complete),
+        candidate_space_exhausted=exhaustive)
     return selected, info

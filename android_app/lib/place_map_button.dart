@@ -103,11 +103,13 @@ class _MapOpening with WidgetsBindingObserver {
 class PlaceMapButton extends StatefulWidget {
   final Map<String, dynamic> place;
   final bool lookupDetail;
+  final bool quiet;
   final PlaceDetailLookup? detailLookup;
   const PlaceMapButton({
     super.key,
     required this.place,
     this.lookupDetail = false,
+    this.quiet = false,
     this.detailLookup,
   });
 
@@ -134,22 +136,39 @@ class _PlaceMapButtonState extends State<PlaceMapButton> {
   }
 
   @override
-  Widget build(BuildContext context) => TextButton.icon(
+  Widget build(BuildContext context) => FilledButton.icon(
     onPressed: _opening ? null : _open,
     icon: _opening
         ? const SizedBox(
-            width: 14,
-            height: 14,
+            width: 18,
+            height: 18,
             child: CircularProgressIndicator(strokeWidth: 2),
           )
-        : const Icon(Icons.map_outlined, size: 16),
+        : const Icon(Icons.map_outlined, size: 20),
     label: Text(
-      _opening ? '불러오는 중...' : (widget.lookupDetail ? '카카오맵에서 보기' : '지도에서 보기'),
+      _opening ? '카카오맵 여는 중…' : '카카오맵에서 보기',
+      textAlign: TextAlign.center,
+      style: TextStyle(
+        fontSize: widget.quiet ? 13 : 14,
+        fontWeight: widget.quiet ? FontWeight.w500 : FontWeight.w700,
+      ),
     ),
-    style: TextButton.styleFrom(
-      foregroundColor: Colors.grey.shade600,
-      alignment: Alignment.centerLeft,
-      padding: const EdgeInsets.symmetric(vertical: 8),
+    style: FilledButton.styleFrom(
+      backgroundColor: widget.quiet
+          ? Colors.transparent
+          : const Color(0xFFFFF3EC),
+      foregroundColor: const Color(0xFF914B33),
+      disabledBackgroundColor: const Color(0xFFF5F0EC),
+      disabledForegroundColor: const Color(0xFF78665E),
+      side: widget.quiet
+          ? BorderSide.none
+          : const BorderSide(color: Color(0xFFE7D1C4)),
+      minimumSize: const Size(0, 48),
+      padding: EdgeInsets.symmetric(
+        horizontal: widget.quiet ? 0 : 16,
+        vertical: 12,
+      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
     ),
   );
 }
@@ -186,7 +205,7 @@ Future<void> openPlaceMap(
         ).timeout(const Duration(seconds: 36));
         if (resolved != null && _isKakaoDetailUrl(resolved)) detail = resolved;
       } catch (_) {
-        // The coordinate fallback below still requires consent and eligibility.
+        // Coordinate fallback still requires eligibility.
       }
     }
     if (!context.mounted || !opening.canContinue) return;
@@ -199,37 +218,11 @@ Future<void> openPlaceMap(
     if (lat == null || lng == null) throw const FormatException('위치 정보가 없습니다.');
     if (!place.coordinateMapAllowed) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('좌표 품질 확인이 필요한 장소예요. 좌표 지도 대신 장소 이름과 주소를 확인해주세요.'),
-        ),
+        const SnackBar(content: Text('위치를 찾지 못했어요. 장소 이름이나 주소로 검색해주세요.')),
       );
       return;
     }
-    // Neither a concrete address nor finite coordinates proves location
-    // accuracy. Older saved records have no coordinate-quality contract.
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        scrollable: true,
-        title: const Text('참고 위치 열기'),
-        content: Text(
-          '${place.name}\n${place.address}\n\n'
-          '저장된 좌표가 실제 장소와 일치하는지 확인되지 않았어요. '
-          '지도에서 장소 이름과 주소를 다시 확인해주세요.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('취소'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('참고 위치 열기'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true || !opening.canContinue) return;
+    if (!opening.canContinue) return;
     final app = Uri.parse('kakaomap://look?p=$lat,$lng');
     bool canOpenApp;
     try {
@@ -245,7 +238,7 @@ Future<void> openPlaceMap(
     if (!opening.canContinue) return;
     // Kakao's documented coordinate-only link keeps labels out of the routing
     // fields: an encoded label comma can redirect mobile web to its home page.
-    // Keep the original name/address in the consent notice and saved record.
+    // Keep the original name/address in the saved record.
     final web = Uri.parse('https://map.kakao.com/link/map/$lat,$lng');
     launched = await opening.launch(web);
     if (!launched) {
@@ -254,7 +247,7 @@ Future<void> openPlaceMap(
   } catch (_) {
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('지도를 열 수 없어요. 위치 정보와 지도 앱을 확인해주세요.')),
+        const SnackBar(content: Text('지도를 열 수 없어요. 잠시 후 다시 시도해주세요.')),
       );
     }
   } finally {

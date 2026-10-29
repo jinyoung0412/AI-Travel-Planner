@@ -14,7 +14,7 @@ from scripts.offline_environment import install
 install()
 import pandas as pd
 import requests
-from blog_evidence import address_anchor
+from blog_evidence import address_anchor, reviewed_tags_post
 from Preprocess.RunPreprocess.build_database import build, merge_verified_tags, read_database, write_database
 from Preprocess.RunPreprocess.migrate_place_ids import migrate
 
@@ -36,9 +36,10 @@ def quarantine_digest(path):
 def proof(place, label):
     # Mock source evidence in a temporary copy, not a claim about a real post.
     log_no = {'existing': '101', 'new': '102'}[label]
-    return {'url': f'https://blog.naver.com/offline-review/{log_no}',
+    value = {'url': f'https://blog.naver.com/offline-review/{log_no}',
             'name_excerpt': f"{place['가게명']} 후기", 'address_excerpt': place['주소'],
             'tags': [f'offline-{label}']}
+    return reviewed_tags_post(place, value, value['tags'])
 
 
 def tag_record(place, label):

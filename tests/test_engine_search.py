@@ -9,6 +9,7 @@ import pytest
 from recommendation_ai import (add_scores, distances_from, route_metrics, search_courses,
                                find_best_for_plan, select_courses, generate_fixed_courses)
 from Flask_server.recommender import search as engine
+from Flask_server.recommender.route_coherence import penalty as coherence_penalty
 from clustering_ai import find_optimal_clusters, perform_clustering
 
 ORIGIN = (36.8, 127.1)
@@ -96,17 +97,14 @@ def test_small_search_matches_exhaustive_objective_and_diversity(transport):
             point = (place['latitude'], place['longitude'])
             cost += distances_from(current, [point])[0] / engine.RADIUS_KM[transport] + 1 - place['score']
             current = point
-        options.append((cost / len(path), ids))
-    expected = []
-    while options:
-        best = min(options, key=lambda item: (
-            item[0] + .08 * max((len(set(item[1]) & set(prev)) / 3 for prev in expected), default=0),
-            tie(seed, item[1])))
-        expected.append(best[1])
-        options.remove(best)
+        options.append((cost / len(path) + coherence_penalty(path, ORIGIN, transport), ids))
     courses, info = search_courses(data, categories, ['조용한'], category_filter,
                                    n=100, start=ORIGIN, transport=transport, seed=seed, beam_width=1)
-    assert course_ids(courses) == expected
+    # Independent exhaustive oracle: retain every feasible itinerary and the
+    # exact best first route. Alternative ranking follows the new variety policy.
+    assert set(course_ids(courses)) == {ids for _, ids in options}
+    optimum = min(options, key=lambda item: (item[0], tie(seed, item[1])))
+    assert course_ids(courses)[0] == optimum[1]
     assert info['search_method'] == 'exhaustive'
     assert info['candidate_space_exhausted']
     assert info['reason'] == 'insufficient_unique_courses'
@@ -143,7 +141,7 @@ def test_beam_best_course_matches_small_complete_enumeration():
             point = (place['latitude'], place['longitude'])
             cost += float(distances_from(current, [point])[0] / 4.5 + 1 - place['score'])
             current = point
-        return cost / 3
+        return cost / 3 + coherence_penalty(path, ORIGIN, '대중교통')
 
     optimum = min(objective(path) for path in itertools.product(*pools))
     assert info['search_method'] == 'beam_with_feasibility_completion'
@@ -255,7 +253,11 @@ def test_legacy_wrappers_preserve_result_shapes_and_ignore_clusters():
     selected = select_courses(data, stops, category_filter, top_n=5, start=ORIGIN)
     fixed = generate_fixed_courses(data, [], category_filter, n=5, spots=3, start=ORIGIN)
     assert len(best) == 3 and len(selected) == len(fixed) == 5
-    assert selected[0]['course'] == best
+    # A jointly allocated set can choose a different equal-quality first route.
+    # With six eligible venues and fifteen visits, nine repeats are unavoidable.
+    assert len({p['place_id'] for item in selected for p in item['course']}) == 6
+    assert all([p['카테고리'] for p in item['course']] == ['한식', '공원', '카페']
+               for item in selected)
     assert all(set(item) == {'course', 'total_score'} for item in selected)
     assert all(item['total_score'] == sum(p['score'] for p in item['course']) for item in selected)
 

@@ -303,7 +303,8 @@ def _export_reviewed(manifest, targets, output):
                 raise ValueError('취향 태그는 추출된 태그의 부분집합이어야 하며 지역·교류·행사 태그는 제외합니다.')
             confirmed += 1
             if approved:
-                kept.append({**post, 'tags': sorted(set(approved))})
+                from blog_evidence import reviewed_tags_post
+                kept.append(reviewed_tags_post(target_map[pid], post, approved))
         if kept:
             rows.append({'place_id': pid, 'blog_tag_status': 'verified',
                          'verified_posts': json.dumps(kept, ensure_ascii=False)})
