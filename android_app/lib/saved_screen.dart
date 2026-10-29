@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'place_map_button.dart';
 import 'course_timeline.dart';
 import 'travel_data.dart';
-import 'preference_notice.dart';
+import 'course_summary_card.dart';
 import 'local_storage_service.dart';
 
 class SavedScreen extends StatefulWidget {
@@ -302,15 +302,11 @@ class SavedScreenState extends State<SavedScreen>
                   fontWeight: FontWeight.bold,
                 ),
               ),
-              Text(
-                '${spots.length}개 장소',
-                style: TextStyle(fontSize: 13, color: Colors.grey.shade500),
-              ),
               const SizedBox(height: 8),
-              PreferenceNotice(metadata: jsonObject(course['metadata'] ?? {})),
-              Text(
-                distanceNotice(course['metric'], places: spots),
-                style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+              CourseSummaryCard(
+                metric: jsonObject(course['metric'] ?? {}),
+                metadata: const {},
+                places: spots,
               ),
               const Divider(),
               CourseTimeline(places: spots),
@@ -356,78 +352,87 @@ class _SpotCard extends StatelessWidget {
               ),
             ],
           ),
-          child: Row(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  color: const Color(0xFFFFF0EB),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: const Icon(
-                  Icons.place_rounded,
-                  color: Color(0xFFFF7043),
-                  size: 24,
-                ),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      data.name,
-                      style: const TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.bold,
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFFF0EB),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(
+                      Icons.place_rounded,
+                      color: Color(0xFFFF7043),
+                      size: 22,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Text(
+                        data.name,
+                        style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
-                    const SizedBox(height: 4),
-                    Wrap(
-                      spacing: 6,
-                      runSpacing: 4,
-                      children: [
-                        if (category.isNotEmpty) ...[
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 2,
-                            ),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFFFF0EB),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Text(
-                              category,
-                              style: const TextStyle(
-                                fontSize: 11,
-                                color: Color(0xFFFF7043),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                        ],
-                        Text(
-                          '탭하여 지도 열기',
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: Colors.grey.shade400,
-                          ),
-                        ),
-                      ],
+                  ),
+                  IconButton(
+                    tooltip: '스팟 삭제',
+                    icon: Icon(
+                      Icons.delete_outline,
+                      color: Colors.grey.shade400,
+                      size: 20,
                     ),
-                  ],
-                ),
+                    onPressed: onDelete,
+                  ),
+                ],
               ),
-              IconButton(
-                tooltip: '스팟 삭제',
-                icon: Icon(
-                  Icons.delete_outline,
-                  color: Colors.grey.shade400,
-                  size: 20,
+              if (category.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFFF0EB),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      category,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Color(0xFFD14A24),
+                      ),
+                    ),
+                  ),
                 ),
-                onPressed: onDelete,
+              ],
+              if (data.address.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Text(
+                  data.address,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    height: 1.5,
+                    color: Color(0xFF5F6368),
+                  ),
+                ),
+              ],
+              const SizedBox(height: 12),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: PlaceMapButton(place: spot, lookupDetail: true),
               ),
             ],
           ),
@@ -455,7 +460,7 @@ class _CourseCard extends StatelessWidget {
 
     return Semantics(
       button: true,
-      label: '$region 코스 자세히 보기',
+      label: '$region 코스 보기',
       child: InkWell(
         onTap: onTap,
         child: Container(
@@ -503,7 +508,7 @@ class _CourseCard extends StatelessWidget {
                           ),
                         ),
                         Text(
-                          '${spots.length}개 장소 · 탭하여 자세히 보기',
+                          '코스 보기',
                           style: TextStyle(
                             fontSize: 11,
                             color: Colors.grey.shade400,
@@ -524,55 +529,31 @@ class _CourseCard extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 12),
-              Row(
-                children: spots.asMap().entries.map((e) {
-                  final isLast = e.key == spots.length - 1;
-                  return Expanded(
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Column(
-                            children: [
-                              Container(
-                                width: 28,
-                                height: 28,
-                                decoration: const BoxDecoration(
-                                  color: Color(0xFF26C6DA),
-                                  shape: BoxShape.circle,
-                                ),
-                                alignment: Alignment.center,
-                                child: Text(
-                                  '${e.key + 1}',
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                PlaceData.fromJson(e.value).name,
-                                style: const TextStyle(fontSize: 10),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                textAlign: TextAlign.center,
-                              ),
-                            ],
+              for (final entry in spots.asMap().entries)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '${entry.key + 1}. ${PlaceData.fromJson(entry.value).name}',
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      if (PlaceData.fromJson(entry.value).address.isNotEmpty)
+                        Text(
+                          PlaceData.fromJson(entry.value).address,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            height: 1.5,
+                            color: Color(0xFF5F6368),
                           ),
                         ),
-                        if (!isLast)
-                          Container(
-                            width: 16,
-                            height: 2,
-                            color: const Color(0xFF26C6DA),
-                            margin: const EdgeInsets.only(bottom: 18),
-                          ),
-                      ],
-                    ),
-                  );
-                }).toList(),
-              ),
+                    ],
+                  ),
+                ),
             ],
           ),
         ),

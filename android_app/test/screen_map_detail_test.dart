@@ -166,34 +166,34 @@ void main() {
       }, () => client);
     });
 
-    testWidgets('$screen requires cancellable consent after lookup failure', (
-      tester,
-    ) async {
-      await http.runWithClient(() async {
-        resolvedUrl = null;
-        responseStatus = 503;
-        final target = await mount(tester, screen, stop());
-        final before = await storedData();
-        await tester.tap(target);
-        // The map button keeps its busy indicator while consent is pending.
-        await tester.pump();
-        await tester.pump(const Duration(milliseconds: 300));
-        expect(requests, hasLength(1));
-        expect(find.byType(AlertDialog), findsOneWidget);
-        expect(launches, isEmpty);
-        await tester.tap(find.text('취소'));
-        await tester.pumpAndSettle();
-        expect(launches, isEmpty);
-        expect(await storedData(), before);
-        // Cancelling releases the shared lock so the same screen can retry.
-        resolvedUrl = 'https://place.map.kakao.com/42';
-        responseStatus = 200;
-        await tester.tap(target);
-        await finishLaunch(tester);
-        expect(requests, hasLength(2));
-        expect(launches, ['https://place.map.kakao.com/42']);
-        expect(tester.takeException(), isNull);
-      }, () => client);
-    });
+    testWidgets(
+      '$screen opens coordinates after lookup failure and can retry after return',
+      (tester) async {
+        await http.runWithClient(() async {
+          resolvedUrl = null;
+          responseStatus = 503;
+          final target = await mount(tester, screen, stop());
+          final before = await storedData();
+          await tester.tap(target);
+          await finishLaunch(tester);
+          expect(requests, hasLength(1));
+          expect(find.byType(AlertDialog), findsNothing);
+          expect(launches, hasLength(1));
+          expect(
+            launches.single,
+            startsWith('https://map.kakao.com/link/map/'),
+          );
+          expect(await storedData(), before);
+          launches.clear();
+          resolvedUrl = 'https://place.map.kakao.com/42';
+          responseStatus = 200;
+          await tester.tap(target);
+          await finishLaunch(tester);
+          expect(requests, hasLength(2));
+          expect(launches, ['https://place.map.kakao.com/42']);
+          expect(tester.takeException(), isNull);
+        }, () => client);
+      },
+    );
   }
 }

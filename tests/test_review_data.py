@@ -3,6 +3,7 @@ import copy
 import hashlib
 import itertools
 import json
+from blog_evidence import reviewed_tags_post
 from types import SimpleNamespace
 
 import pandas as pd
@@ -22,8 +23,9 @@ def place(address='충남 천안시 중앙로 10', **extra):
 
 
 def post(row, number='123'):
-    return {'url': f'https://blog.naver.com/reviewer/{number}',
+    value = {'url': f'https://blog.naver.com/reviewer/{number}',
             'name_excerpt': row['가게명'], 'address_excerpt': row['주소'], 'tags': ['quiet']}
+    return reviewed_tags_post(row, value, value['tags'])
 
 
 @pytest.mark.parametrize('partial', [{}, {'latitude': 36.9}, {'longitude': 127.2},

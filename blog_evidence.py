@@ -4,7 +4,7 @@ import re
 from collections import Counter
 from urllib.parse import parse_qs, urlparse
 
-from place_identity import normalize, provider_identifier, text
+from place_identity import identity_key, normalize, provider_identifier, text
 
 
 def compact(value):
@@ -122,6 +122,38 @@ def post_records(serialized):
         return []
 
 
+def reviewed_tags_post(place, post, approved_tags):
+    """Bind a deliberate place-level review to the exact approved tag subset.
+
+    Only the manual-review exporter calls this in production. Name/address
+    co-occurrence proves that a post mentions a place, not that every hashtag
+    in a multi-place article describes it. This record is audit provenance,
+    not a cryptographic attestation of real-world truth.
+    """
+    if (not verify_post(place, post) or not isinstance(approved_tags, list) or
+            any(not isinstance(tag, str) or not tag.strip() or
+                tag not in post.get('tags', []) for tag in approved_tags)):
+        raise ValueError('장소별로 검토한 태그는 해당 글의 태그 부분집합이어야 합니다.')
+    tags = sorted(set(approved_tags))
+    return {**post, 'tags': tags, 'tag_review': {
+        'scope': 'place_reviewed', 'place_identity': identity_key(place),
+        'post_key': post_url_key(post.get('url')), 'approved_tags': list(tags)}}
+
+
+def has_place_tag_review(place, post):
+    review = post.get('tag_review')
+    tags = post.get('tags')
+    if (not isinstance(review, dict) or review.get('scope') != 'place_reviewed' or
+            not isinstance(tags, list) or any(not isinstance(t, str) for t in tags)):
+        return False
+    try:
+        return (review.get('place_identity') == identity_key(place) and
+                review.get('post_key') == post_url_key(post.get('url')) and
+                review.get('approved_tags') == sorted(set(tags)))
+    except (TypeError, ValueError):
+        return False
+
+
 def validated_posts(place, serialized):
     """Return unique accepted posts and invalid payloads separately from duplicates."""
     accepted, rejected, seen = [], [], set()
@@ -130,7 +162,9 @@ def validated_posts(place, serialized):
             rejected.append(post)
             continue
         tags = post.get('tags', [])
-        if not isinstance(tags, list) or any(not isinstance(t, str) for t in tags):
+        if (not isinstance(tags, list) or not tags or
+                any(not isinstance(t, str) or not t.strip() for t in tags) or
+                not has_place_tag_review(place, post)):
             rejected.append(post)
             continue
         key = post_url_key(post['url'])

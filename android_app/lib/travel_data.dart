@@ -92,15 +92,12 @@ String distanceNotice(
   if (places.any(
     (place) => !PlaceData.fromJson(place).coordinateDistanceAllowed,
   )) {
-    return '좌표 품질 확인이 필요한 장소가 있어 코스 거리를 표시하지 않아요.\n'
-        '장소 위치와 교통 경로시간은 방문 전 확인해주세요.';
+    return '';
   }
   final distance = metric is Map
       ? finiteNumber(metric['estimated_distance_km'])
       : null;
-  final prefix = distance != null && distance >= 0
-      ? '출발점부터 약 ${distance.toStringAsFixed(1)}km (직선거리 추정)\n'
+  return distance != null && distance >= 0
+      ? '직선거리 약 ${distance.toStringAsFixed(1)} km'
       : '';
-  return '$prefix저장된 좌표로 계산한 참고값이며 실제 장소 위치와 다를 수 있어요.\n'
-      '교통 경로시간과 영업시간은 방문 전 확인해주세요.';
 }

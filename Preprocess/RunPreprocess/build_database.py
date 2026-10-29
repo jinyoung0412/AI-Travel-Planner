@@ -75,7 +75,7 @@ def _merge_metadata(old_rows, input_rows, replace_all, metadata_mode):
                 continue
             target = metadata.setdefault(pid, {})
             for key, value in row.items():
-                if key in BLOG_COLUMNS or key in (ALIAS_COLUMN, CONFLICT_COLUMN, *PROVIDER_COLUMNS, *COORDINATE_COLUMNS) or pd.isna(value) or value == '':
+                if key in BLOG_COLUMNS or key in ('카테고리', 'category_source', ALIAS_COLUMN, CONFLICT_COLUMN, *PROVIDER_COLUMNS, *COORDINATE_COLUMNS) or pd.isna(value) or value == '':
                     continue
                 if not incoming or metadata_mode == 'update' or key not in target:
                     target[key] = value
@@ -97,6 +97,21 @@ def _merge_metadata(old_rows, input_rows, replace_all, metadata_mode):
     for pid, place in metadata.items():
         expected = (identity_key(place) if text(place.get('주소', place.get('address')))
                     else place['identity_key'])
+        # Keep category and its provenance from one matching identity row.
+        # A blank/fallback update must not relabel an older provider category.
+        category_rows = [row for row in candidates[pid] if identity_key(row) == expected]
+        eligible = [row for row in category_rows if text(row.get('카테고리')) and
+                    text(row.get('category_source')) != 'search_fallback']
+        if eligible:
+            quality = max(2 if text(row.get('category_source')) == 'provider' else 1 for row in eligible)
+            preferred = [row for row in eligible if (2 if text(row.get('category_source')) == 'provider' else 1) == quality]
+            category_row = preferred[-1 if metadata_mode == 'update' else 0]
+            place.update(카테고리=text(category_row.get('카테고리')),
+                         category_source=text(category_row.get('category_source')) or 'legacy_unknown')
+        else:
+            place.update(카테고리='', category_source=(
+                'search_fallback' if any(text(row.get('category_source')) == 'search_fallback'
+                                         for row in category_rows) else 'unavailable'))
         matching = [row for row in candidates[pid] if coordinates_match_identity(row, expected)]
         selected = matching[-1 if metadata_mode == 'update' else 0] if matching else None
         pair = coordinate_pair(selected) if selected else (None, None)
@@ -171,7 +186,7 @@ def merge_verified_tags(places, blog_tags, existing=None, replace_all=False, met
                [(row, True) for row in blog_tags.to_dict('records')])
     hints, collected, quarantine = _merge_evidence(metadata, candidates, sources)
     columns = list(dict.fromkeys([c for c in combined.columns if c not in BLOG_COLUMNS] +
-                                ['place_id', 'identity_key', '가게명', '주소', '카테고리', *COORDINATE_COLUMNS]))
+                                ['place_id', 'identity_key', '가게명', '주소', '카테고리', 'category_source', *COORDINATE_COLUMNS]))
     records = []
     for pid, place in metadata.items():
         tags, posts = tags_from_posts(place, list(collected.get(pid, {}).values()))

@@ -1,9 +1,15 @@
 import 'package:flutter/material.dart';
 import 'location_service.dart';
+import 'activity_choice_dialog.dart';
+import 'service_region_dialog.dart';
 import 'transit_hubs.dart';
 import 'recommendation_source.dart';
 import 'network/tag_suggestion_exception.dart';
 import 'travel_data.dart';
+import 'network/request_cancellation.dart';
+import 'course_shortage.dart';
+import 'result_actions.dart';
+import 'result_notice.dart';
 
 import 'spot_result_screen.dart';
 import 'course_result_screen.dart';
@@ -28,6 +34,8 @@ class InputScreen extends StatefulWidget {
 
 class _InputScreenState extends State<InputScreen> {
   final _textController = TextEditingController();
+  final _formScrollController = ScrollController();
+  String? _recommendationError;
   String _region = '내 주변';
   String _transport = '대중교통';
   String? _selectedHub;
@@ -45,6 +53,14 @@ class _InputScreenState extends State<InputScreen> {
   int _requestRevision = 0;
   int _tagRevision = 0;
   int _currentStep = 0;
+  int? _tagQuestion;
+  String _lastObservedText = '';
+  bool _usingFallbackOrigin = false;
+  List<String> _recentPlaceIds = [];
+  RequestCancellation? _cancellation;
+  Widget? _lastResults;
+  String? _lastResultActivity;
+  VoidCallback? _restoreLastResultControls;
 
   final Set<String> _selectedTags = {};
 
@@ -52,7 +68,8 @@ class _InputScreenState extends State<InputScreen> {
   Color get _themeColor =>
       _isSpot ? const Color(0xFFFF7043) : const Color(0xFF26C6DA);
 
-  bool get _needsHub => _region != '내 주변' && _transport == '대중교통';
+  bool get _needsHub =>
+      _region != '내 주변' && _transport == '대중교통' && !_usingFallbackOrigin;
 
   LocationFix? get _origin {
     if (_region == '내 주변') {
@@ -75,8 +92,8 @@ class _InputScreenState extends State<InputScreen> {
           ? '현재 위치 확인됨'
           : (_locationLoading ? '위치 가져오는 중...' : '위치를 확인해주세요');
     }
-    if (_needsHub && _selectedHub != null) return '$_selectedHub 대표 위치 기준';
-    if (!_needsHub) return '$_region 중심부 기준 (차)';
+    if (_needsHub && _selectedHub != null) return _selectedHub!;
+    if (!_needsHub) return '$_region 중심 출발';
     return '$_region — 출발지를 선택해주세요';
   }
 
@@ -94,9 +111,18 @@ class _InputScreenState extends State<InputScreen> {
     super.initState();
     _resultCount = _isSpot ? 5 : 3;
     if (!_isSpot) _slotTypes = _defaultTemplate(_spotCount);
-    _textController.addListener(_invalidateTags);
+    _textController.addListener(_onTextChanged);
     _locationSource = widget.locationSource ?? DeviceLocationSource();
     _fetchLocation();
+  }
+
+  void _onTextChanged() {
+    // IMEs also notify for cursor and composing changes. Only a new sentence
+    // invalidates a pending suggestion or an approval dialog.
+    if (_lastObservedText == _textController.text) return;
+    _lastObservedText = _textController.text;
+    _recentPlaceIds = [];
+    _invalidateTags();
   }
 
   void _invalidateTags() {
@@ -117,15 +143,31 @@ class _InputScreenState extends State<InputScreen> {
       );
       return;
     }
-    setState(() => _currentStep++);
+    FocusScope.of(context).unfocus();
+    setState(() {
+      if (_currentStep == 1 && _tagQuestion != null) {
+        if (_tagQuestion! < _visibleTagGroups.length - 1) {
+          _tagQuestion = _tagQuestion! + 1;
+        } else {
+          _tagQuestion = null;
+        }
+      } else {
+        _currentStep++;
+      }
+    });
   }
 
   void _goPrev() {
+    _cancellation?.cancel();
     _requestRevision++;
     _invalidateTags();
     setState(() {
       _isLoading = false;
-      if (_currentStep > 0) _currentStep--;
+      if (_currentStep == 1 && _tagQuestion != null) {
+        _tagQuestion = _tagQuestion! > 0 ? _tagQuestion! - 1 : null;
+      } else if (_currentStep > 0) {
+        _currentStep--;
+      }
     });
   }
 
@@ -142,7 +184,11 @@ class _InputScreenState extends State<InputScreen> {
     setState(() => _isTagLoading = true);
     try {
       final suggested = await widget.source.suggestTags(text);
-      if (!mounted || revision != _tagRevision) return;
+      if (!mounted ||
+          revision != _tagRevision ||
+          _textController.text.trim() != text) {
+        return;
+      }
       final allTags = _kTagGroups.values.expand((l) => l).toSet();
       final filtered = suggested.where(allTags.contains).toList();
       final toAdd = <String>[];
@@ -161,7 +207,60 @@ class _InputScreenState extends State<InputScreen> {
         );
         return;
       }
-      setState(() {
+      final nextTags = toAdd.toSet();
+      if (_selectedTags.isNotEmpty &&
+          (!_selectedTags.containsAll(nextTags) ||
+              !nextTags.containsAll(_selectedTags))) {
+        final changes = <String>[];
+        for (final group in _visibleTagGroups) {
+          String values(Set<String> tags) {
+            final selected = group.value.where(tags.contains);
+            return selected.isEmpty
+                ? '없음'
+                : selected
+                      .map((tag) => _kActivityTagLabels[tag] ?? tag)
+                      .join(', ');
+          }
+
+          final before = values(_selectedTags), after = values(nextTags);
+          if (before != after) {
+            final label = switch (group.key) {
+              '누구와' => '동행',
+              '어떤 분위기' => '분위기',
+              '어떤 활동' => '활동',
+              _ => group.key,
+            };
+            changes.add('$label: $before → $after');
+          }
+        }
+
+        setState(() => _isTagLoading = false);
+        final accepted = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('선택을 이렇게 바꿀까요?'),
+            scrollable: true,
+            content: Text(changes.join('\n\n')),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('유지하기'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('변경 적용'),
+              ),
+            ],
+          ),
+        );
+        if (!mounted ||
+            revision != _tagRevision ||
+            _textController.text.trim() != text ||
+            accepted != true) {
+          return;
+        }
+      }
+      _changeControls(() {
         _selectedTags
           ..clear()
           ..addAll(toAdd);
@@ -185,15 +284,15 @@ class _InputScreenState extends State<InputScreen> {
     }
   }
 
-  Iterable<MapEntry<String, List<String>>> get _visibleTagGroups => _kTagGroups
-      .entries
-      .where((e) => _isSpot || (e.key != '어떤 활동' && e.key != '실내 · 야외'));
+  Iterable<MapEntry<String, List<String>>> get _visibleTagGroups =>
+      _kTagGroups.entries.where((e) => _isSpot || e.key != '어떤 활동');
 
   Future<void> _fetchLocation() async {
     if (_locationLoading) return;
     final revision = ++_locationRevision;
     setState(() {
       _locationLoading = true;
+      _recommendationError = null;
       _locationError = null;
       _gpsLat = null;
       _gpsLng = null;
@@ -222,13 +321,32 @@ class _InputScreenState extends State<InputScreen> {
   bool _isInServiceArea(double lat, double lng) =>
       lat >= 36.55 && lat <= 37.05 && lng >= 126.80 && lng <= 127.35;
 
-  Future<void> _submit() async {
+  void _changeControls(VoidCallback change) => setState(() {
+    change();
+    _recentPlaceIds = [];
+    _recommendationError = null;
+  });
+
+  void _showRecommendationError(String message) {
+    setState(() => _recommendationError = message);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _formScrollController.hasClients) {
+        _formScrollController.jumpTo(0);
+      }
+    });
+  }
+
+  Future<void> _submit({String? repeatedActivity}) async {
     if (_isLoading || _isTagLoading) return;
+    // Clear the input focus history before a dialog can restore it on close.
+    FocusScope.of(context).unfocus();
     final whoTags = _kTagGroups['누구와']!.toSet();
-    if (!_selectedTags.any(whoTags.contains)) {
+    if (!_selectedTags.any(whoTags.contains) &&
+        _textController.text.trim().isEmpty) {
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('"누구와" 항목을 선택해주세요.')));
+      ).showSnackBar(const SnackBar(content: Text('문장을 적거나 동행을 선택해주세요.')));
+      _openTagQuestion(0);
       return;
     }
     if (_region == '내 주변' && (_gpsLat == null || _gpsLng == null)) {
@@ -244,7 +362,12 @@ class _InputScreenState extends State<InputScreen> {
       return;
     }
     final revision = ++_requestRevision;
-    setState(() => _isLoading = true);
+    _cancellation?.cancel();
+    _cancellation = RequestCancellation();
+    setState(() {
+      _isLoading = true;
+      _recommendationError = null;
+    });
     _invalidateTags();
     try {
       double? effectiveLat = _origin?.lat;
@@ -254,33 +377,22 @@ class _InputScreenState extends State<InputScreen> {
           if (!mounted) return;
           final proceed = await showDialog<bool>(
             context: context,
-            builder: (_) => AlertDialog(
-              title: const Text('서비스 지역 안내'),
-              content: const Text(
-                '현재 위치가 서비스 지역(천안·아산)을 벗어났습니다.\n'
-                '천안 중심부 기준으로 추천을 받으시겠습니까?',
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context, false),
-                  child: const Text('취소'),
-                ),
-                TextButton(
-                  onPressed: () => Navigator.pop(context, true),
-                  child: const Text('천안으로 추천'),
-                ),
-              ],
-            ),
+            builder: (_) => const ServiceRegionDialog(),
           );
           if (!mounted || revision != _requestRevision || proceed != true) {
             return;
           }
           effectiveLat = 36.8151;
           effectiveLng = 127.1139;
+          _changeControls(() {
+            _region = '천안';
+            _selectedHub = null;
+            _usingFallbackOrigin = true;
+          });
         }
       }
 
-      final request = RecommendationRequest(
+      var request = RecommendationRequest(
         mode: widget.mode,
         userText: _textController.text.trim(),
         transport: _transport,
@@ -290,58 +402,334 @@ class _InputScreenState extends State<InputScreen> {
         tags: _selectedTags.toList(),
         count: _resultCount,
         slotTypes: _slotTypes,
+        naturalPlan: false,
+        recentPlaceIds: _recentPlaceIds,
+        cancellation: _cancellation,
       );
-      final res = await widget.source.recommend(request);
+      if (request.userText.isNotEmpty &&
+          widget.source is IntentRecommendationSource) {
+        final intentSource = widget.source as IntentRecommendationSource;
+        var response = await intentSource.interpret(request);
+        if (!mounted || revision != _requestRevision) return;
+        final initial = response == null || response.containsKey('error')
+            ? null
+            : jsonObject(response['data'] ?? response);
+        if (initial?['clarification_required'] == true) {
+          final clarification = jsonObject(initial!['clarification']);
+          final canRepeat =
+              repeatedActivity != null &&
+              jsonObjects(
+                clarification['options'],
+              ).any((option) => option['value'] == repeatedActivity);
+          final choice = canRepeat
+              ? repeatedActivity
+              : await _chooseActivity(clarification);
+          if (!mounted || revision != _requestRevision) return;
+          if (choice == null) {
+            setState(() => _currentStep = 1);
+            return;
+          }
+          request = request.clarified(
+            activity: choice,
+            token: clarification['token'] as String,
+          );
+          response = await intentSource.interpret(request);
+          if (!mounted || revision != _requestRevision) return;
+          final repeated = response == null || response.containsKey('error')
+              ? null
+              : jsonObject(response['data'] ?? response);
+          if (repeated?['clarification_required'] == true) {
+            _showRecommendationError(
+              '고른 활동으로 요청을 확정하지 못했어요. 문장을 수정하거나 활동을 다시 선택해주세요.',
+            );
+            setState(() => _currentStep = 1);
+            return;
+          }
+        }
+        if (response == null || response.containsKey('error')) {
+          _showRecommendationError(
+            '${response?['error'] ?? '여행 문장을 해석하지 못했어요.'}',
+          );
+          return;
+        }
+        final preview = jsonObject(response['data'] ?? response);
+        final plan = jsonObject(preview['travel_request']);
+        final issues = [
+          ...(plan['ambiguities'] as List? ?? []),
+          ...(plan['unsupported'] as List? ?? []),
+        ];
+        final switchMode = preview['mode_switch_required'] == true;
+        // A complete request proceeds directly. Only ask when the user must
+        // resolve an ambiguity or choose a different recommendation mode.
+        if (issues.isNotEmpty || switchMode) {
+          final approved = await _resolveIntent(issues);
+          if (!mounted || revision != _requestRevision) return;
+          if (!approved) {
+            setState(() => _currentStep = 1);
+            return;
+          }
+        }
+        request = request.reviewed(
+          token: preview['intent_token'] as String,
+          targetMode: preview['target_mode'] as String,
+          targetCount: preview['target_count'] as int,
+        );
+      }
+      var res = await widget.source.recommend(request);
+      if (!mounted || revision != _requestRevision) return;
+      if (res?['reason'] == 'unverified_conditions') {
+        final metadata = jsonObject(res?['metadata'] ?? {});
+        final labels = (metadata['unverified_conditions'] as List? ?? [])
+            .whereType<Map>()
+            .map((c) => c['label'])
+            .join(', ');
+        final approved =
+            await showDialog<bool>(
+              context: context,
+              builder: (context) => AlertDialog(
+                title: const Text('조건을 바꿔볼까요?'),
+                content: Text(
+                  labels.isEmpty
+                      ? '일부 조건을 제외하고 다시 찾아볼까요?'
+                      : '$labels 조건을 제외하고 다시 찾아볼까요?',
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context, false),
+                    child: const Text('조건 유지'),
+                  ),
+                  TextButton(
+                    onPressed: () => Navigator.pop(context, true),
+                    child: const Text('다시 찾기'),
+                  ),
+                ],
+              ),
+            ) ??
+            false;
+        if (!mounted || revision != _requestRevision) return;
+        if (!approved) {
+          setState(() => _currentStep = 1);
+          return;
+        }
+        request = request.reviewed(
+          token: request.intentToken!,
+          unverified: true,
+        );
+        res = await widget.source.recommend(request);
+      }
       if (!mounted || revision != _requestRevision) return;
 
       if (res == null || res.containsKey('error')) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('${res?['error'] ?? '서버 오류가 발생했습니다.'}')),
+        final shortage = CourseShortage.fromResponse(
+          res,
+          request,
+          labels: _kSlotLabels,
         );
+        if (shortage != null) {
+          final action = await showDialog<String>(
+            context: context,
+            builder: (context) => AlertDialog(
+              title: Text(shortage.title),
+              content: SingleChildScrollView(child: Text(shortage.message)),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('닫기'),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.pop(context, 'location'),
+                  child: const Text('출발점·교통 수정'),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.pop(context, 'activity'),
+                  child: Text(_isSpot ? '문장 수정' : '방문 순서 수정'),
+                ),
+              ],
+            ),
+          );
+          if (!mounted || revision != _requestRevision) return;
+          if (action != null) {
+            setState(
+              () => _currentStep = action == 'location'
+                  ? 0
+                  : (!_isSpot && !request.naturalPlan
+                        ? 2
+                        : (request.userText.isNotEmpty || _isSpot ? 1 : 2)),
+            );
+          }
+          return;
+        }
+        _showRecommendationError('${res?['error'] ?? '서버 오류가 발생했습니다.'}');
         return;
       }
 
       final data = RecommendationData.fromJson(res);
 
-      if (_isSpot) {
+      if (request.mode == 'spot') {
         final places = data.places;
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => SpotResultScreen(
-              places: places,
-              requestedCount: _resultCount,
-              metadata: data.metadata,
-            ),
+        _openResults(
+          SpotResultScreen(
+            places: places,
+            sameAsPrevious:
+                _lastResults is SpotResultScreen &&
+                samePlaceComposition(
+                  places,
+                  (_lastResults as SpotResultScreen).places,
+                ),
+            requestedCount: request.count,
+            metadata: data.metadata,
           ),
+          revision,
+          activityChoice: request.activityChoice,
         );
       } else {
         final courses = data.courses;
         final metadata = data.metadata;
         final metrics = data.courseMetrics;
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => CourseResultScreen(
-              courses: courses,
-              requestedCount: _resultCount,
-              region: _region,
-              metadata: metadata,
-              courseMetrics: metrics,
-            ),
+        _openResults(
+          CourseResultScreen(
+            courses: courses,
+            sameAsPrevious:
+                _lastResults is CourseResultScreen &&
+                sameCourseComposition(
+                  courses,
+                  (_lastResults as CourseResultScreen).courses
+                      .map(jsonObjects)
+                      .toList(),
+                ),
+            requestedCount: request.count,
+            region: request.region,
+            metadata: metadata,
+            courseMetrics: metrics,
+            transport: request.transport,
           ),
+          revision,
+          activityChoice: request.activityChoice,
         );
       }
     } catch (_) {
       if (!mounted || revision != _requestRevision) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('추천 결과를 불러오지 못했어요. 다시 시도해주세요.')),
-      );
+      _showRecommendationError('추천 결과를 불러오지 못했어요. 다시 시도해주세요.');
     } finally {
       if (mounted && revision == _requestRevision) {
         setState(() => _isLoading = false);
       }
     }
+  }
+
+  VoidCallback _captureResultControls() {
+    final form = (
+      text: _textController.text,
+      region: _region,
+      transport: _transport,
+      hub: _selectedHub,
+      count: _resultCount,
+      spotCount: _spotCount,
+      slots: List<String>.from(_slotTypes),
+      tags: Set<String>.from(_selectedTags),
+      fallback: _usingFallbackOrigin,
+      lat: _gpsLat,
+      lng: _gpsLng,
+    );
+    return () => _changeControls(() {
+      _textController.text = form.text;
+      _region = form.region;
+      _transport = form.transport;
+      _selectedHub = form.hub;
+      _resultCount = form.count;
+      _spotCount = form.spotCount;
+      _slotTypes = List<String>.from(form.slots);
+      _selectedTags
+        ..clear()
+        ..addAll(form.tags);
+      _usingFallbackOrigin = form.fallback;
+      _tagQuestion = null;
+      _gpsLat = form.lat;
+      _gpsLng = form.lng;
+    });
+  }
+
+  void _openResults(
+    Widget screen,
+    int revision, {
+    VoidCallback? restoreControls,
+    String? activityChoice,
+  }) {
+    final restore = restoreControls ?? _captureResultControls();
+    // Retain only the latest successful result. A failed refresh or cancelled
+    // confirmation must not destroy a result that the user has not saved.
+    _lastResults = screen;
+    _lastResultActivity = activityChoice;
+    _restoreLastResultControls = restore;
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    Navigator.push<ResultAction>(
+      context,
+      MaterialPageRoute(builder: (_) => screen),
+    ).then((action) {
+      if (!mounted || revision != _requestRevision || action == null) return;
+      restore();
+      if (action == ResultAction.edit) {
+        _recentPlaceIds = [];
+        setState(() => _currentStep = 0);
+      } else {
+        // Refresh the signed interpretation with a fresh seed. Preserve only
+        // the explicitly chosen activity; unknown-condition consent is renewed.
+        _recentPlaceIds = _resultPlaceIds(screen);
+        _submit(repeatedActivity: activityChoice);
+      }
+    });
+  }
+
+  List<String> _resultPlaceIds(Widget screen) {
+    final places = screen is SpotResultScreen
+        ? screen.places
+        : screen is CourseResultScreen
+        ? screen.courses.expand((course) => jsonObjects(course)).toList()
+        : <Map<String, dynamic>>[];
+    return places
+        .map((p) => p['place_id'])
+        .whereType<String>()
+        .where((id) => id.isNotEmpty)
+        .toSet()
+        .take(100)
+        .toList();
+  }
+
+  Future<String?> _chooseActivity(Map<String, dynamic> clarification) {
+    final options = jsonObjects(clarification['options']);
+    return showDialog<String>(
+      context: context,
+      builder: (context) => ActivityChoiceDialog(options: options),
+    );
+  }
+
+  Future<bool> _resolveIntent(List<dynamic> issues) async {
+    final hasIssues = issues.isNotEmpty;
+    final message = hasIssues
+        ? issues
+              .whereType<Map>()
+              .map((e) => '${e['quote']} — ${e['reason']}')
+              .join('\n\n')
+        : '여러 장소를 순서대로 방문하는 코스 1개를 추천해요.';
+    return await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: Text(hasIssues ? '문장을 조금만 바꿔주세요' : '코스로 추천할까요?'),
+            content: SingleChildScrollView(child: Text(message)),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('문장 수정'),
+              ),
+              if (!hasIssues)
+                TextButton(
+                  onPressed: () => Navigator.pop(context, true),
+                  child: const Text('코스로 전환해 추천'),
+                ),
+            ],
+          ),
+        ) ??
+        false;
   }
 
   @override
@@ -368,13 +756,28 @@ class _InputScreenState extends State<InputScreen> {
         body: Column(
           children: [
             _buildStepIndicator(),
+            if (_lastResults != null)
+              TextButton.icon(
+                onPressed: _isLoading
+                    ? null
+                    : () => _openResults(
+                        _lastResults!,
+                        _requestRevision,
+                        restoreControls: _restoreLastResultControls,
+                        activityChoice: _lastResultActivity,
+                      ),
+                icon: const Icon(Icons.history, size: 18),
+                label: const Text('이전 추천 다시 보기'),
+              ),
             Expanded(
               child: AbsorbPointer(
                 absorbing: _isLoading,
                 child: GestureDetector(
                   onTap: () => FocusScope.of(context).unfocus(),
                   child: AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 220),
+                    duration: MediaQuery.disableAnimationsOf(context)
+                        ? Duration.zero
+                        : const Duration(milliseconds: 220),
                     layoutBuilder: (child, previousChildren) => Stack(
                       alignment: Alignment.topCenter,
                       children: [...previousChildren, if (child != null) child],
@@ -382,9 +785,19 @@ class _InputScreenState extends State<InputScreen> {
                     transitionBuilder: (child, animation) =>
                         FadeTransition(opacity: animation, child: child),
                     child: SingleChildScrollView(
-                      key: ValueKey(_currentStep),
+                      key: ValueKey('$_currentStep:$_tagQuestion'),
+                      controller: _formScrollController,
                       padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
-                      child: _buildCurrentStep(),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          if (_recommendationError != null)
+                            _RecommendationErrorNotice(
+                              message: _recommendationError!,
+                            ),
+                          _buildCurrentStep(),
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -408,21 +821,25 @@ class _InputScreenState extends State<InputScreen> {
         border: Border(bottom: BorderSide(color: Colors.grey.shade200)),
       ),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           for (int i = 0; i < labels.length; i++) ...[
             if (i > 0)
               Expanded(
                 child: Container(
                   height: 1.5,
-                  margin: const EdgeInsets.only(bottom: 22),
+                  margin: const EdgeInsets.only(top: 14),
                   color: i <= _currentStep ? _themeColor : Colors.grey.shade300,
                 ),
               ),
-            _StepDot(
-              index: i,
-              label: labels[i],
-              currentStep: _currentStep,
-              themeColor: _themeColor,
+            Expanded(
+              flex: 3,
+              child: _StepDot(
+                index: i,
+                label: labels[i],
+                currentStep: _currentStep,
+                themeColor: _themeColor,
+              ),
             ),
           ],
         ],
@@ -455,9 +872,11 @@ class _InputScreenState extends State<InputScreen> {
           themeColor: _themeColor,
           onSelect: (r) {
             if (r != '내 주변') _cancelLocation();
-            setState(() {
+            _changeControls(() {
               _region = r;
               _selectedHub = null;
+              _usingFallbackOrigin = false;
+              _recentPlaceIds = [];
             });
           },
         ),
@@ -504,9 +923,11 @@ class _InputScreenState extends State<InputScreen> {
           options: const ['대중교통', '차'],
           selected: _transport,
           themeColor: _themeColor,
-          onSelect: (t) => setState(() {
+          onSelect: (t) => _changeControls(() {
             _transport = t;
             _selectedHub = null;
+            _usingFallbackOrigin = false;
+            _recentPlaceIds = [];
           }),
         ),
         if (_needsHub) ...[
@@ -523,7 +944,7 @@ class _InputScreenState extends State<InputScreen> {
                 label: name,
                 selected: sel,
                 color: _themeColor,
-                onTap: () => setState(() => _selectedHub = name),
+                onTap: () => _changeControls(() => _selectedHub = name),
               );
             }).toList(),
           ),
@@ -540,7 +961,7 @@ class _InputScreenState extends State<InputScreen> {
               label: _isSpot ? '$n곳' : '$n개',
               selected: sel,
               color: _themeColor,
-              onTap: () => setState(() => _resultCount = n),
+              onTap: () => _changeControls(() => _resultCount = n),
             );
           }).toList(),
         ),
@@ -557,7 +978,7 @@ class _InputScreenState extends State<InputScreen> {
                 label: '$n곳',
                 selected: sel,
                 color: _themeColor,
-                onTap: () => setState(() {
+                onTap: () => _changeControls(() {
                   if (_spotCount == n) return;
                   _spotCount = n;
                   _slotTypes = _defaultTemplate(n);
@@ -567,32 +988,25 @@ class _InputScreenState extends State<InputScreen> {
           ),
         ],
         const SizedBox(height: 20),
-        Row(
-          children: [
-            Icon(
-              _locationReady ? Icons.location_on : Icons.location_searching,
-              size: 15,
-              color: _locationReady ? _themeColor : Colors.grey.shade400,
-            ),
-            const SizedBox(width: 6),
-            Expanded(
-              child: Text(
-                _locationLabel,
-                style: TextStyle(
-                  fontSize: 13,
-                  color: _locationReady ? _themeColor : Colors.grey.shade400,
+        if (!_needsHub)
+          Row(
+            children: [
+              Icon(
+                _locationReady ? Icons.location_on : Icons.location_searching,
+                size: 15,
+                color: _locationReady ? _themeColor : Colors.grey.shade400,
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  _locationLabel,
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: _locationReady ? _themeColor : Colors.grey.shade400,
+                  ),
                 ),
               ),
-            ),
-          ],
-        ),
-        if (_needsHub && _selectedHub != null)
-          const Padding(
-            padding: EdgeInsets.only(top: 8),
-            child: Text(
-              '역·터미널의 공개 지도상 대표 위치로 추천해요. 실제 출입구와 승차 위치는 다를 수 있어요. 지도 데이터: © OpenStreetMap contributors (Mapcarta).',
-              style: TextStyle(fontSize: 12, color: Color(0xFF757575)),
-            ),
+            ],
           ),
         const SizedBox(height: 8),
       ],
@@ -600,18 +1014,23 @@ class _InputScreenState extends State<InputScreen> {
   }
 
   Widget _buildStep2() {
+    if (_tagQuestion != null) return _buildTagQuestion();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _label(_isSpot ? '어떤 장소를 찾고 있나요?' : '어떤 날을 원하나요?'),
+        _title(_isSpot ? '어떤 장소를 찾고 있나요?' : '어떤 날을 원하나요?'),
         const SizedBox(height: 10),
         TextField(
           controller: _textController,
+          canRequestFocus: !_isLoading,
+          onChanged: (_) {
+            if (_recommendationError != null) _changeControls(() {});
+          },
           maxLines: 2,
           decoration: InputDecoration(
             hintText: _isSpot
-                ? '자유롭게 적으면 AI가 태그를 골라줄게요.\n예) 친구랑 맛집 탐방, 연인과 감성 카페'
-                : '자유롭게 적으면 AI가 태그를 골라줄게요.\n예) 연인이랑 감성적인 하루, 가족과 조용한 나들이',
+                ? '원하는 장소와 조건을 적어주세요.\n예) 친구와 조용한 카페에서 쉬고 싶어요'
+                : '원하는 하루와 조건을 적어주세요.\n예) 연인과 100일 기념 데이트를 하고 싶어요',
             hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 14),
             filled: true,
             fillColor: Colors.white,
@@ -642,37 +1061,92 @@ class _InputScreenState extends State<InputScreen> {
                   )
                 : Icon(Icons.auto_awesome, size: 16, color: _themeColor),
             label: Text(
-              'AI 태그 자동 선택',
+              '문장으로 태그 고르기',
               style: TextStyle(fontSize: 13, color: _themeColor),
             ),
           ),
         ),
+        if (_selectedTags.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: _selectedTags
+                .map(
+                  (tag) => _ChoicePill(
+                    label: _kActivityTagLabels[tag] ?? tag,
+                    selected: true,
+                    color: _themeColor,
+                    onTap: () => _openTagQuestion(
+                      _visibleTagGroups.toList().indexWhere(
+                        (group) => group.value.contains(tag),
+                      ),
+                    ),
+                  ),
+                )
+                .toList(),
+          ),
+        ],
+        const SizedBox(height: 16),
+        OutlinedButton.icon(
+          onPressed: () => _openTagQuestion(0),
+          icon: const Icon(Icons.touch_app_outlined),
+          label: const Text('직접 태그 선택하기'),
+        ),
         const SizedBox(height: 8),
-        ..._visibleTagGroups.map((entry) {
-          final isSingle = _kSingleSelectGroups.contains(entry.key);
-          String? hint;
-          if (entry.key == '누구와') hint = '필수 선택';
-          if (entry.key == '어떤 분위기') hint = '복수 선택 가능';
-          return _TagSection(
-            title: entry.key,
-            tags: entry.value,
-            selectedTags: _selectedTags,
-            themeColor: _themeColor,
-            hint: hint,
-            onToggle: (tag) {
-              _invalidateTags();
-              setState(() {
-                if (_selectedTags.contains(tag)) {
-                  _selectedTags.remove(tag);
-                } else {
-                  if (isSingle) _selectedTags.removeAll(entry.value);
-                  _selectedTags.add(tag);
+      ],
+    );
+  }
+
+  void _openTagQuestion(int index) {
+    FocusScope.of(context).unfocus();
+    setState(() => _tagQuestion = index < 0 ? 0 : index);
+  }
+
+  Widget _buildTagQuestion() {
+    final groups = _visibleTagGroups.toList();
+    final entry = groups[_tagQuestion!];
+    final title = switch (entry.key) {
+      '누구와' => '누구와 함께하나요?',
+      '어떤 분위기' => '어떤 분위기를 원하나요?',
+      '특별한 날' => '특별한 날인가요?',
+      '실내 · 야외' => '실내와 야외 중 어디가 좋나요?',
+      _ => '어떤 활동을 원하나요?',
+    };
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Semantics(
+          header: true,
+          label: '태그 질문 ${_tagQuestion! + 1}/${groups.length}',
+          child: _title(title),
+        ),
+        const SizedBox(height: 12),
+        _TagSection(
+          title: entry.key,
+          showTitle: false,
+          tags: entry.value,
+          selectedTags: _selectedTags,
+          themeColor: _themeColor,
+          hint: entry.key == '누구와'
+              ? null
+              : entry.key == '어떤 분위기'
+              ? '여러 개 선택 가능'
+              : '선택사항',
+          onToggle: (tag) {
+            _invalidateTags();
+            _changeControls(() {
+              if (_selectedTags.contains(tag)) {
+                _selectedTags.remove(tag);
+              } else {
+                if (_kSingleSelectGroups.contains(entry.key)) {
+                  _selectedTags.removeAll(entry.value);
                 }
-              });
-            },
-          );
-        }),
-        const SizedBox(height: 8),
+                _selectedTags.add(tag);
+              }
+            });
+          },
+        ),
       ],
     );
   }
@@ -681,48 +1155,34 @@ class _InputScreenState extends State<InputScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _label('어떤 순서로 놀까요?'),
-        const SizedBox(height: 6),
-        Text(
-          '각 슬롯을 탭해서 원하는 활동으로 바꿀 수 있어요.',
-          style: TextStyle(fontSize: 13, color: Colors.grey.shade500),
-        ),
+        _title('방문 순서'),
         const SizedBox(height: 28),
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Row(
-            children: [
-              for (int i = 0; i < _slotTypes.length; i++) ...[
-                if (i > 0)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    child: Icon(
-                      Icons.arrow_forward_ios,
-                      size: 12,
-                      color: Colors.grey.shade400,
-                    ),
-                  ),
-                _SlotChip(
-                  slotType: _slotTypes[i],
-                  onTap: () => _showSlotPicker(i),
-                ),
-              ],
-            ],
-          ),
+        Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          children: [
+            for (int i = 0; i < _slotTypes.length; i++)
+              _SlotChip(
+                order: i + 1,
+                slotType: _slotTypes[i],
+                onTap: () => _showSlotPicker(i),
+              ),
+          ],
         ),
         const SizedBox(height: 20),
         Align(
           alignment: Alignment.centerRight,
           child: TextButton.icon(
-            onPressed: () =>
-                setState(() => _slotTypes = _defaultTemplate(_spotCount)),
+            onPressed: () => _changeControls(() {
+              _slotTypes = _defaultTemplate(_spotCount);
+            }),
             style: TextButton.styleFrom(
               foregroundColor: Colors.grey.shade500,
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             ),
             icon: Icon(Icons.refresh, size: 14, color: Colors.grey.shade400),
             label: Text(
-              '기본값으로 초기화',
+              '기본 순서로 되돌리기',
               style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
             ),
           ),
@@ -760,12 +1220,14 @@ class _InputScreenState extends State<InputScreen> {
                   final isSel = _slotTypes[index] == type;
                   final color = _kSlotStyles[type]!.color;
                   return _ChoicePill(
-                    label: type,
+                    label: _kSlotLabels[type] ?? type,
                     selected: isSel,
                     color: color,
                     icon: _kSlotStyles[type]!.icon,
                     onTap: () {
-                      setState(() => _slotTypes[index] = type);
+                      _changeControls(() {
+                        _slotTypes[index] = type;
+                      });
                       Navigator.pop(context);
                     },
                   );
@@ -808,7 +1270,9 @@ class _InputScreenState extends State<InputScreen> {
           Expanded(
             flex: 2,
             child: ElevatedButton(
-              onPressed: _currentStep < (_isSpot ? 1 : 2)
+              onPressed:
+                  (_currentStep == 1 && _tagQuestion != null) ||
+                      _currentStep < (_isSpot ? 1 : 2)
                   ? _goNext
                   : (_isLoading || _isTagLoading ? null : _submit),
               style: ElevatedButton.styleFrom(
@@ -830,7 +1294,9 @@ class _InputScreenState extends State<InputScreen> {
                       ),
                     )
                   : Text(
-                      _currentStep < (_isSpot ? 1 : 2)
+                      _currentStep == 1 && _tagQuestion != null
+                          ? '선택 완료'
+                          : _currentStep < (_isSpot ? 1 : 2)
                           ? '다음'
                           : (_isSpot ? '장소 추천받기' : '코스 추천받기'),
                       style: const TextStyle(
@@ -844,6 +1310,15 @@ class _InputScreenState extends State<InputScreen> {
       ),
     );
   }
+
+  Widget _title(String text) => Text(
+    text,
+    style: const TextStyle(
+      fontSize: 24,
+      fontWeight: FontWeight.w600,
+      color: Color(0xFF1A1A1A),
+    ),
+  );
 
   Widget _label(String text) => Text(
     text,
@@ -866,11 +1341,13 @@ class _InputScreenState extends State<InputScreen> {
 
   @override
   void dispose() {
+    _cancellation?.cancel();
     _requestRevision++;
     _tagRevision++;
     _cancelLocation();
-    _textController.removeListener(_invalidateTags);
+    _textController.removeListener(_onTextChanged);
     _textController.dispose();
+    _formScrollController.dispose();
     super.dispose();
   }
 }

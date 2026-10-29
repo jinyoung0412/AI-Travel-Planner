@@ -2,24 +2,27 @@ import 'package:flutter/material.dart';
 import 'bookmark_button.dart';
 import 'place_map_button.dart';
 import 'travel_data.dart';
-import 'preference_notice.dart';
 import 'local_storage_service.dart';
+import 'result_actions.dart';
+import 'result_notice.dart';
+import 'result_entrance.dart';
 
 class SpotResultScreen extends StatelessWidget {
   final List<Map<String, dynamic>> places;
   final int requestedCount;
   final Map<String, dynamic> metadata;
+  final bool sameAsPrevious;
 
   const SpotResultScreen({
     super.key,
     required this.places,
     required this.requestedCount,
     this.metadata = const {},
+    this.sameAsPrevious = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    final evidenceBanner = PreferenceNotice.hasNotice(metadata) ? 1 : 0;
     return Scaffold(
       backgroundColor: const Color(0xFFFFF8F3),
       appBar: AppBar(
@@ -31,17 +34,17 @@ class SpotResultScreen extends StatelessWidget {
           style: TextStyle(fontWeight: FontWeight.bold),
         ),
       ),
+      bottomNavigationBar: const ResultActions(),
       body: ListView.builder(
         padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
-        itemCount:
-            places.length +
-            (places.length < requestedCount ? 1 : 0) +
-            evidenceBanner,
+        itemCount: places.length + (places.length < requestedCount ? 1 : 0) + 1,
         itemBuilder: (context, index) {
-          if (evidenceBanner == 1 && index == 0) {
-            return PreferenceNotice(metadata: metadata);
+          if (index == 0) {
+            return sameAsPrevious
+                ? const RepeatedResultNotice()
+                : const SizedBox.shrink();
           }
-          index -= evidenceBanner;
+          index -= 1;
           if (index == 0 && places.length < requestedCount) {
             return Padding(
               padding: const EdgeInsets.only(bottom: 14),
@@ -78,7 +81,10 @@ class SpotResultScreen extends StatelessWidget {
             );
           }
           final i = places.length < requestedCount ? index - 1 : index;
-          return _PlaceCard(place: places[i], rank: i + 1);
+          return ResultEntrance(
+            key: ValueKey(places[i]['place_id'] ?? i),
+            child: _PlaceCard(place: places[i], rank: i + 1),
+          );
         },
       ),
     );
@@ -180,7 +186,11 @@ class _PlaceCard extends StatelessWidget {
                   ),
                 Text(
                   address,
-                  style: TextStyle(fontSize: 13, color: Colors.grey.shade500),
+                  style: const TextStyle(
+                    fontSize: 13,
+                    height: 1.5,
+                    color: Color(0xFF5F6368),
+                  ),
                 ),
                 const SizedBox(height: 10),
                 PlaceMapButton(place: place, lookupDetail: true),

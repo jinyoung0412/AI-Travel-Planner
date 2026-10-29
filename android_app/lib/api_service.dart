@@ -1,9 +1,15 @@
 import 'network/api_client.dart';
+import 'network/request_cancellation.dart';
 
 /// Static compatibility facade used by the app's existing screens.
 class ApiService {
   static const String baseUrl = defaultApiBaseUrl;
   static final ApiClient _client = ApiClient();
+
+  static Future<Map<String, dynamic>> interpretTravel(
+    Map<String, dynamic> body, {
+    RequestCancellation? cancellation,
+  }) => _client.post('/travel/interpret', body, cancellation: cancellation);
 
   static Future<List<String>> suggestTags({required String userText}) =>
       _client.suggestTags(userText: userText, throwOnError: true);
@@ -16,6 +22,8 @@ class ApiService {
     required double userLng,
     required List<String> personaTags,
     required int count,
+    Map<String, dynamic> intentFields = const {},
+    RequestCancellation? cancellation,
   }) => _client.getSpotRecommendation(
     userText: userText,
     transport: transport,
@@ -24,6 +32,8 @@ class ApiService {
     userLng: userLng,
     personaTags: personaTags,
     count: count,
+    intentFields: intentFields,
+    cancellation: cancellation,
   );
 
   static Future<Map<String, dynamic>?> getCourseRecommendation({
@@ -35,6 +45,9 @@ class ApiService {
     required int count,
     int spotCount = 5,
     List<String> slotTypes = const [],
+    String userText = '',
+    Map<String, dynamic> intentFields = const {},
+    RequestCancellation? cancellation,
   }) => _client.getCourseRecommendation(
     transport: transport,
     region: region,
@@ -44,6 +57,9 @@ class ApiService {
     count: count,
     spotCount: spotCount,
     slotTypes: slotTypes,
+    userText: userText,
+    intentFields: intentFields,
+    cancellation: cancellation,
   );
 
   static Future<String?> getKakaoPlaceUrl({
