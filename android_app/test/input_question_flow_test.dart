@@ -223,6 +223,18 @@ void main() {
       expect(t.takeException(), isNull);
     },
   );
+  testWidgets('beer visit is selectable without changing normal meal defaults', (t) async {
+    final source = _Source();
+    await _mount(t, source, mode: 'course');
+    await t.enterText(find.byType(TextField), '기념일에 야장 가고 싶어');
+    await tap(t, '다음');
+    await tap(t, '식사');
+    await tap(t, '맥주·호프');
+    await tap(t, '코스 추천받기');
+    expect(source.interpretations.single.slotTypes, ['맥주·호프', '자연·산책', '카페']);
+    expect(source.recommendations.single.slotTypes, ['맥주·호프', '자연·산책', '카페']);
+    expect(t.takeException(), isNull);
+  });
   testWidgets('course visit cards wrap without clipping at 200 percent text', (
     t,
   ) async {

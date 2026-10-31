@@ -108,7 +108,7 @@ def directly_excluded(tail):
 
 def landmark_suffix(tail):
     """Identify a mentioned landmark, without asserting distance from that landmark."""
-    return bool(re.match(r'\s*(?:(?:의\s*)?(?:근처|주변|옆|인근|부근)|에서\s*가까운)', tail))
+    return bool(re.match(r'\s*(?:(?:의\s*)?(?:바로\s*)?(?:근처|주변|옆|인근|부근)|에서\s*가까운)', tail))
 
 
 def generic_food_modifier(term, concrete, text):
