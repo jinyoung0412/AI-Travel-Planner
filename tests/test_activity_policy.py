@@ -13,7 +13,7 @@ from category_policy import category_matches
 from place_identity import ensure_ids
 from recommendation_ai import fixed_categories
 from recommender.constants import (CORE_ACTIVITY_LABELS, CORE_ACTIVITY_TAG_SLOTS,
-    DEFAULT_COURSE_SLOTS, SLOT_CATEGORY_MAP, CAFE_CATS)
+    DEFAULT_COURSE_SLOTS, SLOT_CATEGORY_MAP, CAFE_CATS, COURSE_ACTIVITY_LABELS)
 from runtime_llm import PERSONA_TAG_GROUPS
 
 
@@ -41,8 +41,8 @@ def test_six_ui_and_server_choices_keep_stable_wire_values():
     styles=dart.split('const _kSlotStyles = {',1)[1].split('};',1)[0]
     labels=dart.split('const _kSlotLabels = {',1)[1].split('};',1)[0]
     tag_choices=re.search(r"'어떤 활동':\s*\[([^\]]+)\]",dart).group(1)
-    assert re.findall(r"'([^']+)': _SlotStyle",styles) == list(CORE_ACTIVITY_LABELS)
-    assert dict(re.findall(r"'([^']+)': '([^']+)'",labels)) == CORE_ACTIVITY_LABELS
+    assert re.findall(r"'([^']+)': _SlotStyle",styles) == list(COURSE_ACTIVITY_LABELS)
+    assert dict(re.findall(r"'([^']+)': '([^']+)'",labels)) == COURSE_ACTIVITY_LABELS
     assert re.findall(r"'([^']+)'",tag_choices) == list(CORE_ACTIVITY_TAG_SLOTS)
     assert fixed_categories(3) == [SLOT_CATEGORY_MAP[s] for s in DEFAULT_COURSE_SLOTS[:3]]
     for tag,slot in CORE_ACTIVITY_TAG_SLOTS.items():

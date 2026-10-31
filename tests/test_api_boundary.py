@@ -39,8 +39,8 @@ def test_suggestion_schema_and_allowlist(client, monkeypatch):
     for malformed in ({}, {'tags': '카페 투어'}, {'tags': [12]}, {'tags': ['']}, []):
         monkeypatch.setattr(app, '_call_claude', lambda *a: malformed)
         failed = client.post('/suggest/tags', json={'user_text': '추천'})
-        assert failed.status_code == 503
-        assert failed.json['reason'] == 'tags_unavailable'
+        assert failed.status_code == 200
+        assert failed.json['metadata']['selection_method'] == 'source_rules_fallback'
 
 
 @pytest.mark.parametrize('text,expected', [
@@ -63,7 +63,7 @@ def test_missing_model_is_service_failure_without_exception_text(client, monkeyp
     for path, data in [('/suggest/tags', {'user_text': '추천'}),
                        ('/recommend/spot', {**ORIGIN, 'user_text': '도자기 만드는 곳'})]:
         response = client.post(path, json=data)
-        assert response.status_code == 503
+        assert response.status_code == (200 if path == '/suggest/tags' else 503)
         assert 'secret' not in response.get_data(as_text=True)
 
 

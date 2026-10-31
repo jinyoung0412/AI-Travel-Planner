@@ -64,7 +64,8 @@ def test_finite_space_counts_optional_and_multiselect_axes_exactly():
     for name,tags in groups.items():
         expected *= 2**len(tags) if name=='어떤 분위기' else len(tags)+1
     assert space['spot_tag_states']==expected==17_891_328
-    assert space['direct_course_activity_sequences']==216+1296+7776
+    assert len(options['activities']) == 7
+    assert space['direct_course_activity_sequences']==343+2401+16807
     assert space['spot_direct_picker_states']==len(options['origins'])*4*expected
     # Course tag visibility is read from its actual getter, never the spot picker.
     denominator=1

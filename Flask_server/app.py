@@ -34,6 +34,8 @@ from family_policy import filter_child_candidates, child_venue, children_allowed
 import travel_intent as intent
 from selection_wire import MAX_OUTPUT_TOKENS as SELECTION_OUTPUT_TOKENS
 from intent_context import normalize_context, context_only, grounded_tags, source_preferences
+from intent_recovery import literal_plan
+from catalogue_cache import CatalogueCache, database_version
 from service_area import filter_service_candidates, candidate_city
 from recommendation_context import build_context, apply_context, order_spots, context_cost, resolve_generic_meal_ambiguities
 
@@ -59,6 +61,24 @@ def get_df(region: str = '') -> pd.DataFrame:
             df = pd.read_sql('SELECT * FROM places', conn)
     log.info('DB 조회: 지역=%s, %s개', region or '전체', len(df))
     return quarantine_legacy(df).drop_duplicates('place_id')
+
+
+_database_get_df = get_df
+_catalogue_cache = CatalogueCache(limit=3)
+
+
+def _base_candidates(region):
+    def load():
+        frame, area = filter_service_candidates(get_df(region), region)
+        frame, review = filter_reviewed_candidates(frame)
+        frame, quality = filter_coordinate_candidates(frame)
+        return frame, area, review, quality
+    # Fixture/alternate data sources keep their original semantics in tests.
+    if get_df is not _database_get_df:
+        return load()
+    key = (database_version(DB_PATH), region, id(filter_service_candidates),
+           id(filter_reviewed_candidates), id(filter_coordinate_candidates))
+    return _catalogue_cache.get(key, load)
 
 
 def _known_categories():
@@ -242,7 +262,15 @@ def suggest_tags():
         return jsonify(tags=grounded_tags([t for t in tags if t in _ALLOWED_TAGS], text, directly_excluded)), 200
     except Exception:
         log.warning('태그 제안 서비스 사용 불가')
-        return jsonify(tags=[], error='태그 제안을 사용할 수 없습니다.', reason='tags_unavailable'), 503
+        from runtime_llm import PERSONA_TAG_GROUPS
+        candidates = grounded_tags(list(_ALLOWED_TAGS), text, directly_excluded)
+        tags = []
+        for name, allowed in PERSONA_TAG_GROUPS.items():
+            hits = [t for t in allowed if t in candidates]
+            # Multiple companions/activities need user choice, not an arbitrary winner.
+            tags.extend(hits if name == '어떤 분위기' or len(hits) == 1 else [])
+        return jsonify(tags=tags, metadata=dict(selection_method='source_rules_fallback',
+            notice='태그 자동 제안이 지연되어 문장에 명시된 태그만 표시했습니다. 선택 내용을 확인해주세요.')), 200
 
 
 def _parse_request(course=False):
@@ -347,8 +375,18 @@ def _interpret(data, mode):
     except Exception as error:
         code = intent.interpretation_failure_code(error)
         log.warning('여행 문장 해석 실패 (%s)', code)
+        recovered = literal_plan(source_text, _known_categories(), normalize_filters) if not choice else None
+        if recovered:
+            plan = intent.validate_interpretation(recovered, source_text, _known_categories(), excluded_categories(source_text))
+            _validate_literal_intent(plan, source_text)
+            plan['interpretation_method'] = 'source_rules_recovery'
+            plan['recovery_reason'] = code
+            return intent.apply_controls(plan, data, mode)
         action = ('문장을 다시 확인하거나 활동을 직접 선택해주세요.' if mode == 'spot' else
                   '문장을 다시 확인하거나 방문 활동과 순서를 직접 선택해주세요.')
+        if code.startswith('intent_') or code == 'invalid_interpretation':
+            raise intent.IntentError('intent_conflict', '여행 문장의 조건을 확인하지 못했어요. ' + action, 422,
+                                     failure_code=code) from None
         raise intent.IntentError('intent_unavailable', '여행 문장을 해석하지 못했어요. ' + action, 503,
                                  failure_code=code) from None
     plan['source_text'] = source_text
@@ -504,10 +542,8 @@ def _recommend_intent(data, mode):
         if plan['ambiguities'] or plan['unsupported']:
             return jsonify(error='확인이 필요한 조건이 있어요. 문장을 수정해주세요.',
                            reason='intent_conflict', metadata=base), 422
-        df, service_area = filter_service_candidates(get_df(data['region']), data['region'])
-        df, identity_review = filter_reviewed_candidates(df)
+        df, service_area, identity_review, quality = _base_candidates(data['region'])
         base['model_budget']['db_reads_max_per_request'] = 1
-        df, quality = filter_coordinate_candidates(df)
         df, family_policy = filter_child_candidates(df, data, plan)
         df = filter_radius(df, data['user_lat'], data['user_lng'], data['transport'])
         excluded = list(dict.fromkeys(c for e in plan['exclusions'] for c in e['category_filters']))
@@ -759,9 +795,7 @@ def recommend_spot():
         # Explicit kinds always take precedence over persona category hints.
         cats = explicit or derive_category_from_tags(data['persona_tags']) or ACTIVITY_CATS
         excluded = excluded_categories(data['user_text'])
-        df, service_area = filter_service_candidates(get_df(data['region']), data['region'])
-        df, identity_review = filter_reviewed_candidates(df)
-        df, quality = filter_coordinate_candidates(df)
+        df, service_area, identity_review, quality = _base_candidates(data['region'])
         df, family_policy = filter_child_candidates(df, data)
         df = filter_radius(df, data['user_lat'], data['user_lng'], data['transport'])
         df = filter_keywords(df, cats, [])
@@ -815,9 +849,7 @@ def recommend_course():
     if data.get('intent_version') == 1:
         return _recommend_intent(data, 'course')
     try:
-        df, service_area = filter_service_candidates(get_df(data['region']), data['region'])
-        df, identity_review = filter_reviewed_candidates(df)
-        df, quality = filter_coordinate_candidates(df)
+        df, service_area, identity_review, quality = _base_candidates(data['region'])
         df, family_policy = filter_child_candidates(df, data)
         df = filter_excluded_categories(df, excluded_categories(data['user_text']))
         df = filter_radius(df, data['user_lat'], data['user_lng'], data['transport'])
