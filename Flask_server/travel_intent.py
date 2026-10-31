@@ -5,6 +5,7 @@ bind a reviewed interpretation to the exact controls; they are not identities.
 """
 import base64
 import copy
+import re
 import hashlib
 import hmac
 import json
@@ -156,9 +157,15 @@ def _quote(value, text):
 
 
 def _label(value):
-    if not isinstance(value, str) or not value.strip() or len(value) > 80:
+    # Display prose is not a category or a constraint. A verbose model label
+    # must not invalidate an otherwise grounded plan. Keep malformed/absurd
+    # values rejected; never truncate source quotes or structured conditions.
+    if not isinstance(value, str):
         raise ValueError('intent_label')
-    return value.strip()
+    value = value.strip()
+    if not value or len(value) > 2048:
+        raise ValueError('intent_label')
+    return value if len(value) <= 80 else value[:79] + '…'
 
 
 def _categories(values, known, text=None):
@@ -182,6 +189,8 @@ schema_version=1. 아래 스키마의 키를 모두 사용하고 다른 키는 �
 "requested_result_count":null 또는 {"value":2,"quote":"두 곳"}}
 단계는 방문 순서대로 1~5개, s1부터 연속 ID. 장소 종류가 없는 일반 데이트/나들이 요청은 stages=[]로 두고 ambiguities에 활동 선택이 필요하다고 기록하세요. 임의로 카페·식사 등을 만들지 마세요.
 단계 quote는 순서의 근거인 짧은 원문 구절. 해당 방문의 구체 종류·수식어·또는 선택 범위를 함께 포함하세요.
+같은 종류의 두/세 곳을 차례로 방문한다고 명시하면 같은 원문 quote를 재사용할 수 있습니다. requested_visit_count에 정확한 방문 수와 수량 원문을 기록하세요.
+activity와 reason은 비어 있지 않은 80자 이하 문자열. conditions/preferences/ambiguities/unsupported는 없으면 []이며 null이 아닙니다. 필수 키를 생략하지 마세요.
 5개 초과는 5개로 자르지 말고 unsupported에 기록. 같은 방문의 선택 종류는 OR, 순차 방문은 별도 단계.
 "카페 두 곳 추천"처럼 단일 종류의 추천 개수는 한 단계와 requested_result_count로 표현.
 "카페 두 곳을 차례로 도는 코스"처럼 실제 두 방문을 원하면 두 단계와 requested_visit_count로 표현.
@@ -193,6 +202,11 @@ conditions.field는 indoor,outdoor,outdoor_seating,open_now,accessible 중 하�
 조건의 필수/선호를 구분: 반드시/야장/실내/야외 명시는 필수, 가능하면은 선호(required=false).
 preferences.field는 quiet,lively,romantic,cool,relaxed만. 다른 요구는 unsupported 또는 ambiguities에 보존.
 기념일·100일·주년·생일·데이트는 여행 목적/상황입니다. 추가 조건을 추측하거나 이것만으로 unsupported/ambiguities에 넣지 마세요.
+대기·혼잡의 부정은 장소 종류 제외가 아닙니다. "줄 안 서고"만을 근거로 식당/음식점/카페를 exclusions에 넣지 마세요. 제외 대상인 장소 종류가 원문 해당 구절에 직접 있어야 합니다.
+정확한 형식 예시: "줄 안 서고 한적한 식당" → {"schema_version":1,"companion":null,"stages":[{"id":"s1","activity":"식사","quote":"한적한 식당","category_filters":["음식점"],"conditions":[],"preferences":[{"field":"quiet","quote":"한적한"}]}],"exclusions":[],"ambiguities":[],"unsupported":[{"quote":"줄 안 서고","reason":"실시간 대기 정보를 확인할 수 없습니다."}],"requested_visit_count":null,"requested_result_count":null}
+정확한 형식 예시: "기념일에 야장 가고 싶어" → {"schema_version":1,"companion":null,"stages":[{"id":"s1","activity":"야장","quote":"야장","category_filters":["맥주","호프"],"conditions":[{"field":"outdoor_seating","value":true,"required":true,"quote":"야장"}],"preferences":[]}],"exclusions":[],"ambiguities":[],"unsupported":[],"requested_visit_count":null,"requested_result_count":null}
+부모님 동행만으로 고령·보행 곤란·휠체어·조용함·고급·한식 조건을 추정하지 마세요. 일반 식사 요청은 종류 추가 선택 없이 식사 한 단계입니다. activity에는 짧은 활동명만 쓰고 긴 설명을 넣지 마세요.
+정확한 형식 예시: "부모님 모시고 식사하고 싶어" → {"schema_version":1,"companion":{"value":"부모님 모시고","quote":"부모님 모시고"},"stages":[{"id":"s1","activity":"식사","quote":"식사","category_filters":["음식점"],"conditions":[],"preferences":[]}],"exclusions":[],"ambiguities":[],"unsupported":[],"requested_visit_count":null,"requested_result_count":null}
 식당·밥집·음식점·식사는 유효한 넓은 식사 요청입니다. 한식·양식 등 구체적인 요리를 정하지 않았다는 이유로 ambiguities에 넣거나 추가 선택을 요구하지 마세요.
 100일·1주년의 숫자는 방문 수가 아닙니다. 감성·고급·이색 등 단순 분위기도 필수 시설 조건으로 바꾸거나 검색을 막지 마세요.
 목적·상황이 있어도 활동 종류가 없으면 활동 선택이 필요하다는 ambiguity 하나만 반환하세요.
@@ -234,11 +248,21 @@ def validate_interpretation(value, text, known, direct_excluded=()):
             raise ValueError('intent_order')
         stage['activity'] = _label(stage['activity'])
         quote = _quote(stage['quote'], text)
+        stage['category_filters'] = _categories(stage['category_filters'], known, quote)
         position = text.find(quote, previous + 1)
         if position < 0:
-            raise ValueError('intent_quote_order')
+            # One source phrase may explicitly describe repeated visits of
+            # the same kind. It does not need to mention "카페" twice.
+            count = p.get('requested_visit_count')
+            same = i > 0 and quote == stages[i-1]['quote'] and stage['category_filters'] == stages[i-1]['category_filters']
+            explicit = re.search(r'(두|세|2|3)\s*곳(?:을)?\s*(?:차례로|순서대로)', text)
+            if not (same and isinstance(count, dict) and type(count.get('value')) is int
+                    and count['value'] == len(stages)
+                    and explicit and {'두': 2, '세': 3, '2': 2, '3': 3}[explicit[1]] == count['value']
+                    and isinstance(count.get('quote'), str) and count['quote'] in text):
+                raise ValueError('intent_quote_order')
+            position = previous
         previous = position
-        stage['category_filters'] = _categories(stage['category_filters'], known, quote)
         if not stage['category_filters']:
             raise ValueError('intent_category_required')
         fields = {}
@@ -273,7 +297,7 @@ def validate_interpretation(value, text, known, direct_excluded=()):
         for entry in _list(p[field], 10):
             _object(entry, ('quote', 'reason'))
             _quote(entry['quote'], text)
-            _label(entry['reason'])
+            entry['reason'] = _label(entry['reason'])
     if not stages and not (p['ambiguities'] or p['unsupported']):
         raise ValueError('intent_stages')
     count = p['requested_visit_count']
@@ -326,6 +350,9 @@ def apply_controls(plan, data, mode):
                        set(filters_for_activity(stage['category_filters'], SLOT_CATEGORY_MAP[slot]))
                        == set(stage['category_filters'])]
             if not matches:
+                if set(stage['category_filters']).issubset({'맥주', '호프'}):
+                    raise IntentError('intent_conflict',
+                        "코스의 방문 활동을 '맥주·호프'로 바꿔주세요. 야외 좌석 여부는 별도 확인이 필요해요.")
                 if len(stage['category_filters']) > 1:
                     kinds = ' / '.join(stage['category_filters'][:3])
                     if len(stage['category_filters']) > 3:

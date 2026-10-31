@@ -23,6 +23,7 @@ const _kSlotStyles = {
   '문화·역사': _SlotStyle(Icons.account_balance, Color(0xFF7B1FA2)),
   '체험': _SlotStyle(Icons.palette, Color(0xFFE91E63)),
   '실내 오락': _SlotStyle(Icons.videogame_asset, Color(0xFF5E35B1)),
+  '맥주·호프': _SlotStyle(Icons.sports_bar, Color(0xFFFFA000)),
 };
 
 // Labels can change without rewriting stored/requested slot values.
@@ -33,6 +34,7 @@ const _kSlotLabels = {
   '문화·역사': '전시·문화관람',
   '체험': '체험·만들기',
   '실내 오락': '실내 놀거리',
+  '맥주·호프': '맥주·호프',
 };
 const _kActivityTagLabels = {
   '맛집 탐방': '식사',

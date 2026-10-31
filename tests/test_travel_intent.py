@@ -253,14 +253,14 @@ def test_invalid_interpretation_does_not_search_or_select(setup, monkeypatch, mu
     p = plan(); mutation(p); setup[0](p)
     monkeypatch.setattr(app, 'get_df', lambda _: pytest.fail('invalid plan cannot search'))
     result = app.app.test_client().post('/travel/interpret', json={**BASE, 'user_text': '카페'})
-    assert result.status_code == 503
+    assert result.status_code == (503 if result.json.get('metadata', {}).get('failure_code') == 'model_unavailable' else 422)
     assert len(setup[1]) == 1
 
 
 def test_dropped_direct_exclusion_is_rejected(setup):
     setup[0](plan([stage('전시', ['전시'])]))
     result = app.app.test_client().post('/travel/interpret', json={**BASE, 'user_text': '카페 말고 전시'})
-    assert result.status_code == 503
+    assert result.status_code == 422
 
 
 def test_unavailable_interpretation_has_no_fake_ai_success(monkeypatch):
@@ -316,6 +316,9 @@ def test_fixed_plan_model_is_deterministic_and_key_changes_with_evidence(setup, 
     req = {**data, 'intent_token': reviewed['intent_token']}
     a = app.app.test_client().post('/recommend/spot', json=req).json
     b = app.app.test_client().post('/recommend/spot', json=req).json
+    # Wall-clock diagnostics are not part of deterministic recommendation content.
+    for response in (a, b):
+        response['metadata'].pop('selection_elapsed_ms', None)
     assert a == b
     assert a['metadata']['request_key']
     changed = frame()
@@ -448,7 +451,7 @@ def test_unsupported_conditions_stop_before_search(setup, monkeypatch):
 def test_literal_hard_requirements_cannot_be_dropped_by_model(setup, text, p):
     setup[0](p)
     result = app.app.test_client().post('/travel/interpret', json={**BASE, 'user_text': text})
-    assert result.status_code == 503
+    assert result.status_code == 422
 
 
 def test_unrelated_nearby_word_cannot_disable_required_yard_check(setup,monkeypatch):
@@ -457,7 +460,7 @@ def test_unrelated_nearby_word_cannot_disable_required_yard_check(setup,monkeypa
     monkeypatch.setattr(app,'get_df',lambda _:pytest.fail('dropped required condition cannot search'))
     result=app.app.test_client().post('/travel/interpret',json={**BASE,
         'user_text':'가까운 데서 산책하다가 야장'})
-    assert result.status_code==503 and result.json['reason']=='intent_unavailable'
+    assert result.status_code==422 and result.json['reason']=='intent_conflict'
 
 
 @pytest.mark.parametrize('text',['야장 근처 카페','야장 말고 카페','야장보다 카페'])
@@ -578,8 +581,8 @@ def test_category_normalization_uses_each_stage_quote_not_another_stage_alternat
 def test_unrelated_spatial_or_negative_phrase_cannot_disable_specific_kind_guard(setup, text):
     setup[0](plan([stage('닭갈비', ['한식'])]))
     response = app.app.test_client().post('/travel/interpret', json={**BASE, 'mode':'spot', 'user_text':text})
-    assert response.status_code == 503
-    assert response.json['reason'] == 'intent_unavailable'
+    assert response.status_code == 422
+    assert response.json['reason'] == 'intent_conflict'
 
 
 @pytest.mark.parametrize('text', ['카페 근처 닭갈비', '카페 말고 닭갈비', '카페보다 닭갈비'])
@@ -590,7 +593,7 @@ def test_kind_guard_respects_local_landmark_exclusion_and_comparison(text):
 def test_specific_food_cannot_be_expanded_even_if_original_kind_is_in_the_array(setup):
     setup[0](plan([stage('닭갈비 맛집', app.FOOD_CATS)]))
     response = app.app.test_client().post('/travel/interpret', json={**BASE, 'mode':'spot', 'user_text':'닭갈비 맛집'})
-    assert response.status_code == 503 and response.json['reason'] == 'intent_unavailable'
+    assert response.status_code == 422 and response.json['reason'] == 'intent_conflict'
 
 
 def test_manual_slots_preserve_specific_food_and_cafe_kinds(setup):
@@ -820,7 +823,7 @@ def test_activity_choice_preserves_original_indoor_quiet_and_companion(setup, dr
     setup[0](resolved)
     response = app.app.test_client().post('/travel/interpret', json={**data, 'mode': 'spot',
         'activity_choice': '카페', 'clarification_token': token})
-    assert response.status_code == (503 if drop else 200), response.json
+    assert response.status_code == (422 if drop else 200), response.json
     if not drop:
         result = response.json['travel_request']
         assert result['source_text'] == text
@@ -858,7 +861,7 @@ def test_explicit_kind_cannot_be_erased_into_activity_clarification(setup):
     text = '연인이랑 닭갈비 데이트'
     setup[0](unresolved_date(text))
     response = app.app.test_client().post('/travel/interpret', json={**BASE, 'mode':'spot', 'user_text':text})
-    assert response.status_code == 503
+    assert response.status_code == 422
     assert 'clarification' not in response.json
 
 

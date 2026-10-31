@@ -108,7 +108,7 @@ const server = createApp({httpClient, env:{FLASK_BASE_URL:base, KAKAO_API_KEY:''
             actual, error = request('/recommend/course', body)
             assert actual == status and error['error']['reason'] == reason
         status, tags = request('/suggest/tags', {'user_text': '카페'})
-        assert status == 503 and tags['error']['reason'] == 'tags_unavailable'
+        assert status == 200 and tags['data']['metadata']['selection_method'] == 'source_rules_fallback'
         status, pin = request('/kakao/place?' + urlencode({'name': '아지트', 'lat': 36.8151, 'lng': 127.1139}))
         assert status == 200 and pin['place_url'] is None and pin['reason'] == 'map_not_configured'
         # Full new contract over the production gateway and frozen read-only DB.

@@ -1,4 +1,6 @@
 """Narrow recommendation holds for unresolved source identities; DB stays intact."""
+import pandas as pd
+
 from place_identity import normalize
 
 
@@ -24,14 +26,13 @@ REVIEW_EVIDENCE = {
 
 def filter_reviewed_candidates(frame):
     """Hold only the unchanged flagged record, preserving other facilities/IDs."""
-    held = [
-        row.get('place_id') == _HOLD['place_id']
-        and normalize(row.get('가게명')) == normalize(_HOLD['name'])
-        and normalize(row.get('주소')) == normalize(_HOLD['address'])
-        for row in frame.to_dict('records')
-    ]
+    held = frame.get('place_id', pd.Series('', index=frame.index)).eq(_HOLD['place_id'])
+    # Only the flagged identity needs string normalization. Avoid converting
+    # thousands of unrelated records into dictionaries on every request.
+    held = held & frame.get('가게명', pd.Series('', index=frame.index)).where(held, '').map(normalize).eq(normalize(_HOLD['name']))
+    held = held & frame.get('주소', pd.Series('', index=frame.index)).where(held, '').map(normalize).eq(normalize(_HOLD['address']))
     count = sum(held)
-    return frame.loc[[not value for value in held]].copy(), {
+    return frame.loc[~held].copy(), {
         'policy_version': '2026-10-25.v1',
         'input_count': len(frame),
         'excluded_count': count,
