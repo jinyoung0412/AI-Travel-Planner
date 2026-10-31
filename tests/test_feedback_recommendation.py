@@ -289,7 +289,7 @@ def test_interpretation_diagnostics_are_enumerated_without_provider_text(monkeyp
     client = app.app.test_client()
     monkeypatch.setattr(app, '_call_claude', lambda *a,**k: {'not':'a valid intent'})
     result=client.post('/travel/interpret',json={**ORIGIN,'mode':'spot','user_text':'공방'})
-    assert result.status_code == 503
+    assert result.status_code == 422
     assert result.json['metadata']['failure_code'] == 'intent_schema'
     assert ti.interpretation_failure_code(ValueError('private-provider-payload')) == 'invalid_interpretation'
     assert ti.interpretation_failure_code(ti.ModelBoundaryError('provider_timeout')) == 'provider_timeout'

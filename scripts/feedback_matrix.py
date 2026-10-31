@@ -356,7 +356,7 @@ def exhaustive_schema(app, options, findings):
             findings.check(data['slot_types'] == list(slots), 'exhaustive_course_sequence_schema')
     return dict(api_count_limits=api_limits,mood_subsets=2**len(moods), single_tags=len(ui_tags),
                 all_course_sequences=sum(len(options['activities'])**n for n in options['course_visit_counts']),
-                note='Schema acceptance and order preservation only; these are not 9288 recommendation executions.')
+                note='Schema acceptance and order preservation only; these are not recommendation executions.')
 
 
 def payload_for(options, plan, row, mode, seed=11):

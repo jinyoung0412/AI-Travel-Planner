@@ -19,6 +19,7 @@ SLOT_CATEGORY_MAP = {
     '관광지': ['관광지', '온천', '캠핑', '테마공원'],
     '실내 오락': INDOOR_ACTIVITY_CATS,
     '체험': CRAFT_CATS,
+    '맥주·호프': ['맥주', '호프'],
 }
 # Public choices use six concrete activities. Old wire values remain valid for
 # saved/older clients; removing a button must not rewrite an existing request.
@@ -26,6 +27,9 @@ CORE_ACTIVITY_LABELS = {
     '음식': '식사', '카페': '카페·디저트', '자연·산책': '산책·자연',
     '문화·역사': '전시·문화관람', '체험': '체험·만들기', '실내 오락': '실내 놀거리',
 }
+# Explicit course visits are selectable without changing generic activity tags
+# or making ordinary meals/general outings include drinking venues.
+COURSE_ACTIVITY_LABELS = {**CORE_ACTIVITY_LABELS, '맥주·호프': '맥주·호프'}
 DEFAULT_COURSE_SLOTS = ['음식', '자연·산책', '카페', '문화·역사', '음식']
 CORE_ACTIVITY_TAG_SLOTS = {
     '맛집 탐방': '음식', '카페 투어': '카페', '자연/산책': '자연·산책',

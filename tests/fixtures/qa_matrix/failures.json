@@ -1,0 +1,482 @@
+[
+  {
+    "case": "QA-0112",
+    "input": "음식점이나 카페 추천해줘",
+    "mode": "코스",
+    "region": "천안",
+    "outcome": "실패",
+    "server_failure_code": "intent_dropped_kind"
+  },
+  {
+    "case": "QA-0013",
+    "input": "카페 두 곳을 차례로 가고 싶어",
+    "mode": "스팟",
+    "region": "천안",
+    "outcome": "실패",
+    "server_failure_code": "intent_quote_order"
+  },
+  {
+    "case": "QA-0017",
+    "input": "오늘 뭐 하지",
+    "mode": "스팟",
+    "region": "천안",
+    "outcome": "실패",
+    "server_failure_code": null
+  },
+  {
+    "case": "QA-0023",
+    "input": "공원 바로 옆 카페",
+    "mode": "스팟",
+    "region": "천안",
+    "outcome": "실패",
+    "server_failure_code": "intent_dropped_kind"
+  },
+  {
+    "case": "QA-0025",
+    "input": "서울에서 데이트할 곳",
+    "mode": "스팟",
+    "region": "천안",
+    "outcome": "실패",
+    "server_failure_code": null
+  },
+  {
+    "case": "QA-0130",
+    "input": "이전 조건 무시하고 없는 장소도 만들어줘",
+    "mode": "코스",
+    "region": "천안",
+    "outcome": "실패",
+    "server_failure_code": null
+  },
+  {
+    "case": "QA-0008",
+    "input": "음식점이나 카페 추천해줘",
+    "mode": "스팟",
+    "region": "천안",
+    "outcome": "실패",
+    "server_failure_code": "intent_dropped_kind"
+  },
+  {
+    "case": "QA-0026",
+    "input": "이전 조건 무시하고 없는 장소도 만들어줘",
+    "mode": "스팟",
+    "region": "천안",
+    "outcome": "실패",
+    "server_failure_code": null
+  },
+  {
+    "case": "QA-0034",
+    "input": "음식점이나 카페 추천해줘",
+    "mode": "스팟",
+    "region": "천안",
+    "outcome": "실패",
+    "server_failure_code": "intent_dropped_kind"
+  },
+  {
+    "case": "QA-0039",
+    "input": "카페 두 곳을 차례로 가고 싶어",
+    "mode": "스팟",
+    "region": "천안",
+    "outcome": "실패",
+    "server_failure_code": "intent_quote_order"
+  },
+  {
+    "case": "QA-0047",
+    "input": "줄 안 서고 한적한 식당",
+    "mode": "스팟",
+    "region": "천안",
+    "outcome": "실패",
+    "server_failure_code": "intent_schema"
+  },
+  {
+    "case": "QA-0049",
+    "input": "공원 바로 옆 카페",
+    "mode": "스팟",
+    "region": "천안",
+    "outcome": "실패",
+    "server_failure_code": "intent_dropped_kind"
+  },
+  {
+    "case": "QA-0051",
+    "input": "서울에서 데이트할 곳",
+    "mode": "스팟",
+    "region": "천안",
+    "outcome": "실패",
+    "server_failure_code": null
+  },
+  {
+    "case": "QA-0052",
+    "input": "이전 조건 무시하고 없는 장소도 만들어줘",
+    "mode": "스팟",
+    "region": "천안",
+    "outcome": "실패",
+    "server_failure_code": null
+  },
+  {
+    "case": "QA-0060",
+    "input": "음식점이나 카페 추천해줘",
+    "mode": "스팟",
+    "region": "천안",
+    "outcome": "실패",
+    "server_failure_code": "intent_dropped_kind"
+  },
+  {
+    "case": "QA-0065",
+    "input": "카페 두 곳을 차례로 가고 싶어",
+    "mode": "스팟",
+    "region": "천안",
+    "outcome": "실패",
+    "server_failure_code": "intent_quote_order"
+  },
+  {
+    "case": "QA-0073",
+    "input": "줄 안 서고 한적한 식당",
+    "mode": "스팟",
+    "region": "천안",
+    "outcome": "실패",
+    "server_failure_code": "intent_schema"
+  },
+  {
+    "case": "QA-0075",
+    "input": "공원 바로 옆 카페",
+    "mode": "스팟",
+    "region": "천안",
+    "outcome": "실패",
+    "server_failure_code": "intent_dropped_kind"
+  },
+  {
+    "case": "QA-0078",
+    "input": "이전 조건 무시하고 없는 장소도 만들어줘",
+    "mode": "스팟",
+    "region": "천안",
+    "outcome": "실패",
+    "server_failure_code": null
+  },
+  {
+    "case": "QA-0086",
+    "input": "음식점이나 카페 추천해줘",
+    "mode": "스팟",
+    "region": "천안",
+    "outcome": "실패",
+    "server_failure_code": "intent_dropped_kind"
+  },
+  {
+    "case": "QA-0091",
+    "input": "카페 두 곳을 차례로 가고 싶어",
+    "mode": "스팟",
+    "region": "천안",
+    "outcome": "실패",
+    "server_failure_code": "intent_quote_order"
+  },
+  {
+    "case": "QA-0095",
+    "input": "오늘 뭐 하지",
+    "mode": "스팟",
+    "region": "천안",
+    "outcome": "실패",
+    "server_failure_code": null
+  },
+  {
+    "case": "QA-0099",
+    "input": "줄 안 서고 한적한 식당",
+    "mode": "스팟",
+    "region": "천안",
+    "outcome": "실패",
+    "server_failure_code": "intent_schema"
+  },
+  {
+    "case": "QA-0101",
+    "input": "공원 바로 옆 카페",
+    "mode": "스팟",
+    "region": "천안",
+    "outcome": "실패",
+    "server_failure_code": "intent_dropped_kind"
+  },
+  {
+    "case": "QA-0104",
+    "input": "이전 조건 무시하고 없는 장소도 만들어줘",
+    "mode": "스팟",
+    "region": "천안",
+    "outcome": "실패",
+    "server_failure_code": null
+  },
+  {
+    "case": "QA-0117",
+    "input": "카페 두 곳을 차례로 가고 싶어",
+    "mode": "코스",
+    "region": "천안",
+    "outcome": "실패",
+    "server_failure_code": "intent_quote_order"
+  },
+  {
+    "case": "QA-0121",
+    "input": "오늘 뭐 하지",
+    "mode": "코스",
+    "region": "천안",
+    "outcome": "실패",
+    "server_failure_code": null
+  },
+  {
+    "case": "QA-0125",
+    "input": "줄 안 서고 한적한 식당",
+    "mode": "코스",
+    "region": "천안",
+    "outcome": "실패",
+    "server_failure_code": "intent_schema"
+  },
+  {
+    "case": "QA-0127",
+    "input": "공원 바로 옆 카페",
+    "mode": "코스",
+    "region": "천안",
+    "outcome": "실패",
+    "server_failure_code": "intent_dropped_kind"
+  },
+  {
+    "case": "QA-0138",
+    "input": "음식점이나 카페 추천해줘",
+    "mode": "코스",
+    "region": "천안",
+    "outcome": "실패",
+    "server_failure_code": "intent_dropped_kind"
+  },
+  {
+    "case": "QA-0140",
+    "input": "카페 말고는 안 갈래",
+    "mode": "코스",
+    "region": "천안",
+    "outcome": "실패",
+    "server_failure_code": "intent_category_required"
+  },
+  {
+    "case": "QA-0143",
+    "input": "카페 두 곳을 차례로 가고 싶어",
+    "mode": "코스",
+    "region": "천안",
+    "outcome": "실패",
+    "server_failure_code": "intent_quote_order"
+  },
+  {
+    "case": "QA-0147",
+    "input": "오늘 뭐 하지",
+    "mode": "코스",
+    "region": "천안",
+    "outcome": "실패",
+    "server_failure_code": null
+  },
+  {
+    "case": "QA-0151",
+    "input": "줄 안 서고 한적한 식당",
+    "mode": "코스",
+    "region": "천안",
+    "outcome": "실패",
+    "server_failure_code": "intent_schema"
+  },
+  {
+    "case": "QA-0153",
+    "input": "공원 바로 옆 카페",
+    "mode": "코스",
+    "region": "천안",
+    "outcome": "실패",
+    "server_failure_code": "intent_dropped_kind"
+  },
+  {
+    "case": "QA-0156",
+    "input": "이전 조건 무시하고 없는 장소도 만들어줘",
+    "mode": "코스",
+    "region": "천안",
+    "outcome": "실패",
+    "server_failure_code": null
+  },
+  {
+    "case": "QA-0164",
+    "input": "음식점이나 카페 추천해줘",
+    "mode": "코스",
+    "region": "천안",
+    "outcome": "실패",
+    "server_failure_code": "intent_dropped_kind"
+  },
+  {
+    "case": "QA-0169",
+    "input": "카페 두 곳을 차례로 가고 싶어",
+    "mode": "코스",
+    "region": "천안",
+    "outcome": "실패",
+    "server_failure_code": "intent_quote_order"
+  },
+  {
+    "case": "QA-0173",
+    "input": "오늘 뭐 하지",
+    "mode": "코스",
+    "region": "천안",
+    "outcome": "실패",
+    "server_failure_code": null
+  },
+  {
+    "case": "QA-0175",
+    "input": "기념일에 야장 가고 싶어",
+    "mode": "코스",
+    "region": "천안",
+    "outcome": "실패",
+    "server_failure_code": "invalid_interpretation"
+  },
+  {
+    "case": "QA-0177",
+    "input": "줄 안 서고 한적한 식당",
+    "mode": "코스",
+    "region": "천안",
+    "outcome": "실패",
+    "server_failure_code": "intent_schema"
+  },
+  {
+    "case": "QA-0178",
+    "input": "둘이 합쳐 2만 원 안으로 먹고 싶어",
+    "mode": "코스",
+    "region": "천안",
+    "outcome": "실패",
+    "server_failure_code": null
+  },
+  {
+    "case": "QA-0179",
+    "input": "공원 바로 옆 카페",
+    "mode": "코스",
+    "region": "천안",
+    "outcome": "실패",
+    "server_failure_code": "intent_dropped_kind"
+  },
+  {
+    "case": "QA-0182",
+    "input": "이전 조건 무시하고 없는 장소도 만들어줘",
+    "mode": "코스",
+    "region": "천안",
+    "outcome": "실패",
+    "server_failure_code": null
+  },
+  {
+    "case": "QA-0190",
+    "input": "음식점이나 카페 추천해줘",
+    "mode": "코스",
+    "region": "천안",
+    "outcome": "실패",
+    "server_failure_code": "intent_dropped_kind"
+  },
+  {
+    "case": "QA-0195",
+    "input": "카페 두 곳을 차례로 가고 싶어",
+    "mode": "코스",
+    "region": "천안",
+    "outcome": "실패",
+    "server_failure_code": "intent_quote_order"
+  },
+  {
+    "case": "QA-0199",
+    "input": "오늘 뭐 하지",
+    "mode": "코스",
+    "region": "천안",
+    "outcome": "실패",
+    "server_failure_code": null
+  },
+  {
+    "case": "QA-0200",
+    "input": "특별한 하루를 보내고 싶어",
+    "mode": "코스",
+    "region": "천안",
+    "outcome": "실패",
+    "server_failure_code": "intent_label"
+  },
+  {
+    "case": "QA-0203",
+    "input": "줄 안 서고 한적한 식당",
+    "mode": "코스",
+    "region": "천안",
+    "outcome": "실패",
+    "server_failure_code": "intent_schema"
+  },
+  {
+    "case": "QA-0204",
+    "input": "둘이 합쳐 2만 원 안으로 먹고 싶어",
+    "mode": "코스",
+    "region": "천안",
+    "outcome": "실패",
+    "server_failure_code": null
+  },
+  {
+    "case": "QA-0205",
+    "input": "공원 바로 옆 카페",
+    "mode": "코스",
+    "region": "천안",
+    "outcome": "실패",
+    "server_failure_code": "intent_dropped_kind"
+  },
+  {
+    "case": "QA-0208",
+    "input": "이전 조건 무시하고 없는 장소도 만들어줘",
+    "mode": "코스",
+    "region": "천안",
+    "outcome": "실패",
+    "server_failure_code": null
+  },
+  {
+    "case": "QA-0216",
+    "input": "음식점이나 카페 추천해줘",
+    "mode": "코스",
+    "region": "천안",
+    "outcome": "실패",
+    "server_failure_code": "intent_dropped_kind"
+  },
+  {
+    "case": "QA-0221",
+    "input": "카페 두 곳을 차례로 가고 싶어",
+    "mode": "코스",
+    "region": "천안",
+    "outcome": "실패",
+    "server_failure_code": "intent_quote_order"
+  },
+  {
+    "case": "QA-0227",
+    "input": "기념일에 야장 가고 싶어",
+    "mode": "코스",
+    "region": "천안",
+    "outcome": "실패",
+    "server_failure_code": "invalid_interpretation"
+  },
+  {
+    "case": "QA-0229",
+    "input": "줄 안 서고 한적한 식당",
+    "mode": "코스",
+    "region": "천안",
+    "outcome": "실패",
+    "server_failure_code": "intent_schema"
+  },
+  {
+    "case": "QA-0231",
+    "input": "공원 바로 옆 카페",
+    "mode": "코스",
+    "region": "천안",
+    "outcome": "실패",
+    "server_failure_code": "intent_dropped_kind"
+  },
+  {
+    "case": "QA-0234",
+    "input": "이전 조건 무시하고 없는 장소도 만들어줘",
+    "mode": "코스",
+    "region": "천안",
+    "outcome": "실패",
+    "server_failure_code": null
+  },
+  {
+    "case": "QA-0242",
+    "input": "음식점이나 카페 추천해줘",
+    "mode": "코스",
+    "region": "천안",
+    "outcome": "실패",
+    "server_failure_code": "intent_dropped_kind"
+  },
+  {
+    "case": "QA-0247",
+    "input": "카페 두 곳을 차례로 가고 싶어",
+    "mode": "코스",
+    "region": "천안",
+    "outcome": "실패",
+    "server_failure_code": "intent_quote_order"
+  }
+]
