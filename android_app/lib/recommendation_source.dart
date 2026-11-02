@@ -1,4 +1,5 @@
 import 'dart:math';
+import 'travel_data.dart';
 import 'api_service.dart';
 import 'network/request_cancellation.dart';
 
@@ -26,6 +27,11 @@ class RecommendationRequest {
   final String? activityChoice;
   final String? clarificationToken;
   final bool acceptUnverified;
+  final String? consentPlanId;
+  final String? planId;
+  final bool hasChoiceAlternatives;
+  final Map<String, dynamic>? travelRequest;
+  final List<String> acceptedConditionIds;
   final RequestCancellation? cancellation;
   final int seed;
   final List<String> recentPlaceIds;
@@ -45,10 +51,21 @@ class RecommendationRequest {
     this.activityChoice,
     this.clarificationToken,
     this.acceptUnverified = false,
+    this.consentPlanId,
+    this.planId,
+    this.hasChoiceAlternatives = false,
+    Map<String, dynamic>? travelRequest,
+    List<String> acceptedConditionIds = const [],
     this.cancellation,
     int? seed,
     List<String> recentPlaceIds = const [],
-  }) : recentPlaceIds = List.unmodifiable(
+  }) : travelRequest = travelRequest == null
+           ? null
+           : immutableTravelObject(travelRequest),
+       acceptedConditionIds = List.unmodifiable(
+         acceptedConditionIds.toSet().toList()..sort(),
+       ),
+       recentPlaceIds = List.unmodifiable(
          recentPlaceIds
              .map((id) => id.trim())
              .where((id) => id.isNotEmpty && id.length <= 200)
@@ -72,6 +89,9 @@ class RecommendationRequest {
     if (intentToken != null) 'intent_token': intentToken,
     if (activityChoice != null) 'activity_choice': activityChoice,
     'accept_unverified': acceptUnverified,
+    if (consentPlanId != null) 'consent_plan_id': consentPlanId,
+    if (acceptedConditionIds.isNotEmpty)
+      'accepted_condition_ids': acceptedConditionIds,
   };
 
   Map<String, dynamic> get interpretationBody => {
@@ -116,6 +136,11 @@ class RecommendationRequest {
     String? targetMode,
     int? targetCount,
     bool unverified = false,
+    String? consentPlanId,
+    String? planId,
+    bool? hasChoiceAlternatives,
+    Map<String, dynamic>? travelRequest,
+    List<String> acceptedConditionIds = const [],
   }) {
     // A sentence with several visits can be approved as one natural course.
     // This conversion has no course-screen slot selection and must match the
@@ -135,6 +160,12 @@ class RecommendationRequest {
       intentToken: token,
       activityChoice: activityChoice,
       acceptUnverified: unverified,
+      consentPlanId: consentPlanId,
+      planId: planId ?? this.planId,
+      travelRequest: travelRequest ?? this.travelRequest,
+      hasChoiceAlternatives:
+          hasChoiceAlternatives ?? this.hasChoiceAlternatives,
+      acceptedConditionIds: acceptedConditionIds,
       cancellation: cancellation,
       seed: seed,
       recentPlaceIds: recentPlaceIds,
