@@ -33,13 +33,16 @@ from recommendation_review import filter_reviewed_candidates
 from family_policy import filter_child_candidates, child_venue, children_allowed
 import travel_intent as intent
 from selection_wire import MAX_OUTPUT_TOKENS as SELECTION_OUTPUT_TOKENS
-from intent_context import normalize_context, context_only, grounded_tags, source_preferences
+from intent_context import (normalize_context, context_only, grounded_tags, source_preferences,
+                            positive_context_matches)
 from intent_recovery import literal_plan
+from literal_conditions import validate_source_conditions
 from catalogue_cache import CatalogueCache, database_version
 from service_area import filter_service_candidates, candidate_city
 from recommendation_context import build_context, apply_context, order_spots, context_cost, resolve_generic_meal_ambiguities
 
 load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
+intent.validate_signing_key()
 
 from runtime_llm import (call_claude as _call_claude, SPOT_CATEGORY_SYSTEM,
                          TAG_SUGGEST_SYSTEM, TAG_BLOG_SYSTEM, PERSONA_TAGS as _ALLOWED_TAGS)
@@ -427,13 +430,8 @@ def _validate_clarified_conditions(plan, text, original):
     if companion and companion.get('source') != 'manual' and (
             not plan['companion'] or plan['companion']['value'] != companion['value']):
         raise ValueError('intent_dropped_companion')
-    for word, field in (('실내', 'indoor'), ('야외', 'outdoor')):
-        positive = any(not directly_excluded(text[m.end():]) and not landmark_suffix(text[m.end():])
-                       for m in re.finditer(word, text))
-        if positive and not any(c['field'] == field and c['value'] and
-                (c['required'] or '가능하면' in text) for s in plan['stages'] for c in s['conditions']):
-            raise ValueError('intent_dropped_condition')
-    if re.search(r'조용(?:한|하게)', text) and not any(p['field'] == 'quiet'
+    validate_source_conditions(plan, text, _category_mentions(text), _known_categories(), clarified=True)
+    if positive_context_matches(text, r'조용(?:한|하게|히)') and not any(p['field'] == 'quiet'
             for s in plan['stages'] for p in s['preferences']):
         raise ValueError('intent_dropped_preference')
 
@@ -451,6 +449,7 @@ def _validate_literal_intent(plan, text):
     conservative guards only prevent a valid-looking plan losing literal hard
     requirements before its review screen is shown.
     """
+    validate_source_conditions(plan, text, _category_mentions(text), _known_categories())
     # An unrelated "nearby"/negative clause must not disable a positive yard
     # seating requirement elsewhere. A yard used only as a landmark or an
     # explicitly excluded alternative is still delegated to interpretation.
