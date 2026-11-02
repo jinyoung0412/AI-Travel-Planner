@@ -1,4 +1,3 @@
-import 'choice_condition_notice.dart';
 import 'package:flutter/material.dart';
 import 'place_map_button.dart';
 import 'travel_data.dart';
@@ -185,7 +184,6 @@ class _TimelineStop extends StatelessWidget {
                         ),
                         const SizedBox(height: 12),
                       ],
-                      ChoiceConditionNotice(place: place),
                       PlaceMapButton(
                         place: place,
                         lookupDetail: true,
