@@ -10,6 +10,7 @@ import hashlib
 import hmac
 import json
 import math
+import os
 import queue
 import secrets
 import threading
@@ -26,7 +27,7 @@ VERSION = 1
 MAX_STAGES = 5
 MAX_CANDIDATES = 30
 TOKEN_TTL = 1800
-DATA_VERSION = 'places-6e51a45748c2-policy-20261029-v10'
+DATA_VERSION = 'places-6e51a45748c2-policy-20261102-v11'
 _SIGNING_KEY = secrets.token_bytes(32)
 _MODEL_SLOTS = threading.BoundedSemaphore(4)
 CONDITION_FIELDS = {'indoor', 'outdoor', 'outdoor_seating', 'open_now', 'accessible'}
@@ -37,6 +38,22 @@ FIELD_LABELS = {'indoor': '실내', 'outdoor': '야외', 'outdoor_seating': '야
                 'open_now': '현재 영업', 'accessible': '이동 약자 접근성',
                 'quiet': '조용함', 'lively': '활기찬 분위기', 'romantic': '로맨틱함',
                 'cool': '시원함', 'relaxed': '여유로움'}
+
+
+def _signing_key():
+    # Resolve after app.load_dotenv as well as for direct module users. Never
+    # cache the configured value: changing it invalidates earlier signatures.
+    value = os.getenv('TRAVEL_INTENT_SIGNING_KEY', '')
+    if not value:
+        return _SIGNING_KEY  # Existing single-process development behavior.
+    if not re.fullmatch(r'[0-9a-fA-F]{64}', value):
+        raise ValueError('Invalid TRAVEL_INTENT_SIGNING_KEY configuration.')
+    return bytes.fromhex(value)
+
+
+def validate_signing_key():
+    """Validate server configuration after dotenv, without returning key data."""
+    _signing_key()
 
 
 class IntentError(ValueError):
@@ -421,13 +438,14 @@ def sign_plan(plan, data, mode, purpose='recommendation'):
                        'expires': int(time.time()) + TOKEN_TTL, 'data_version': DATA_VERSION,
                        'purpose': purpose}).encode()
     body = base64.urlsafe_b64encode(payload).decode().rstrip('=')
-    return body + '.' + hmac.new(_SIGNING_KEY, body.encode(), hashlib.sha256).hexdigest()
+    return body + '.' + hmac.new(_signing_key(), body.encode(), hashlib.sha256).hexdigest()
 
 
 def read_plan(token, data, mode, purpose='recommendation'):
+    key = _signing_key()
     try:
         body, signature = token.split('.')
-        if not hmac.compare_digest(hmac.new(_SIGNING_KEY, body.encode(), hashlib.sha256).hexdigest(), signature):
+        if not hmac.compare_digest(hmac.new(key, body.encode(), hashlib.sha256).hexdigest(), signature):
             raise ValueError()
         payload = json.loads(base64.urlsafe_b64decode(body + '=' * (-len(body) % 4)))
         if (payload['expires'] < time.time() or payload['fingerprint'] != fingerprint(data, mode)
