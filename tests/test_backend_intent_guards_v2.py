@@ -86,11 +86,12 @@ def test_i03_explicit_preference_is_not_promoted_to_required(monkeypatch, text):
 @pytest.mark.parametrize('text', ['실내 카페나 공원', '실내 카페 또는 공원',
     '실내 카페 혹은 공원', '실내 박물관이나 공원', '실내 카페나 야외 공원',
     '실내 카페 또는 야외 공원', '실내카페나공원'])
-def test_i04_only_branch_conditions_are_not_applied_to_the_whole_or(monkeypatch, text):
+def test_i04_branch_conditions_cannot_be_discarded_or_applied_to_the_whole_or(monkeypatch, text):
     kinds = ['박물관', '공원'] if '박물관' in text else ['카페', '공원']
-    result = interpret(monkeypatch, text, plan((text, kinds, [])))
-    assert result.status_code == 200, result.json
-    assert result.json['travel_request']['stages'][0]['conditions'] == []
+    result = interpret(monkeypatch, text, plan((text, kinds, [])), model_calls=0)
+    assert result.status_code == 422, result.json
+    assert result.json['metadata']['failure_code'] == 'intent_alternative_condition_scope'
+    assert 'intent_token' not in result.json
 
 
 @pytest.mark.parametrize('text', ['나들이는 반드시 실내 카페',

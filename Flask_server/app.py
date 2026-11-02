@@ -36,7 +36,7 @@ from selection_wire import MAX_OUTPUT_TOKENS as SELECTION_OUTPUT_TOKENS
 from intent_context import (normalize_context, context_only, grounded_tags, source_preferences,
                             positive_context_matches)
 from intent_recovery import literal_plan
-from literal_conditions import validate_source_conditions
+from literal_conditions import validate_source_conditions, validate_alternative_condition_scope
 from catalogue_cache import CatalogueCache, database_version
 from service_area import filter_service_candidates, candidate_city
 from recommendation_context import build_context, apply_context, order_spots, context_cost, resolve_generic_meal_ambiguities
@@ -321,10 +321,24 @@ def _intent_error(exc, **extra):
     return jsonify(error=str(exc), reason=exc.reason, **extra), exc.status
 
 
+def _validate_alternative_source(text):
+    try:
+        validate_alternative_condition_scope(text, _category_mentions(text))
+    except ValueError as error:
+        if str(error) != 'intent_alternative_condition_scope':
+            raise
+        raise intent.IntentError('intent_conflict',
+            '선택지마다 필수 조건이 달라 함께 확인할 수 없어요. '
+            '원하는 활동 하나를 골라, 그 활동의 조건과 함께 다시 입력해주세요.',
+            failure_code='intent_alternative_condition_scope') from None
+
+
 def _interpret(data, mode):
     if not data['user_text']:
         raise intent.IntentError('intent_conflict', '원하는 여행을 문장으로 입력해주세요.')
     source_text = data['user_text']
+    # This source-only limit is knowable before paying for interpretation.
+    _validate_alternative_source(source_text)
     interpretation_text = source_text
     original = None
     choice = data.get('activity_choice')
@@ -524,6 +538,7 @@ def _recommend_intent(data, mode):
             raise intent.IntentError('intent_expired', '미확인 대안을 보기 전에 여행 해석을 확인해주세요.', 400)
         plan = (intent.read_plan(data['intent_token'], data, mode) if data.get('intent_token')
                 else _interpret(data, mode))
+        _validate_alternative_source(data['user_text'])
         if not plan['stages']:
             raise intent.IntentError('activity_clarification_required', '먼저 원하는 활동을 선택하고 여행 문장을 확인해주세요.')
         base = dict(travel_request=plan, constraints_relaxed=[],
