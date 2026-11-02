@@ -17,6 +17,125 @@ double? finiteNumber(Object? value) {
   return number != null && number.isFinite ? number : null;
 }
 
+enum TravelConsentPlanKind { plain, choice, unknown, invalid }
+
+/// Classify structure, never infer a choice from the sentence or metadata version.
+TravelConsentPlanKind classifyTravelConsentPlan(Object? value) {
+  if (value is! Map) return TravelConsentPlanKind.unknown;
+  final stages = value['stages'];
+  if (!value.containsKey('schema_version')) {
+    final hasChoiceMarker =
+        stages is List &&
+        stages.whereType<Map>().any((s) => s.containsKey('alternatives'));
+    return hasChoiceMarker
+        ? TravelConsentPlanKind.invalid
+        : TravelConsentPlanKind.unknown;
+  }
+  if (value['schema_version'] != 1 ||
+      stages is! List ||
+      stages.isEmpty ||
+      stages.length > 5) {
+    return TravelConsentPlanKind.invalid;
+  }
+  bool categories(Object? items) =>
+      items is List &&
+      items.isNotEmpty &&
+      items.every((item) => item is String && item.trim().isNotEmpty);
+  bool atoms(Object? items, {required bool conditions}) =>
+      items is List &&
+      items.every(
+        (atom) =>
+            atom is Map &&
+            atom['field'] is String &&
+            (atom['field'] as String).isNotEmpty &&
+            ((atom['quote'] is String &&
+                    (atom['quote'] as String).trim().isNotEmpty) ||
+                (atom['source'] == 'manual' &&
+                    atom.containsKey('quote') &&
+                    atom['quote'] == null)) &&
+            atom['id'] is String &&
+            (atom['id'] as String).isNotEmpty &&
+            (!conditions ||
+                (atom['required'] is bool && atom['value'] is bool)),
+      );
+  var choice = false;
+  for (var i = 0; i < stages.length; i++) {
+    final stage = stages[i];
+    if (stage is! Map ||
+        stage['id'] != 's${i + 1}' ||
+        !categories(stage['category_filters']) ||
+        !atoms(stage['conditions'], conditions: true) ||
+        !atoms(stage['preferences'], conditions: false)) {
+      return TravelConsentPlanKind.invalid;
+    }
+    if (stage.containsKey('alternatives')) {
+      final alternatives = stage['alternatives'];
+      if (alternatives is! List ||
+          alternatives.isEmpty ||
+          alternatives.length > 3 ||
+          stage['choice_cardinality'] != 1) {
+        return TravelConsentPlanKind.invalid;
+      }
+      for (var j = 0; j < alternatives.length; j++) {
+        final alternative = alternatives[j];
+        if (alternative is! Map ||
+            alternative['id'] != 's${i + 1}.a${j + 1}' ||
+            !categories(alternative['category_filters']) ||
+            !atoms(alternative['conditions'], conditions: true) ||
+            !atoms(alternative['preferences'], conditions: false)) {
+          return TravelConsentPlanKind.invalid;
+        }
+      }
+      choice = true;
+    }
+  }
+  return choice ? TravelConsentPlanKind.choice : TravelConsentPlanKind.plain;
+}
+
+/// Keep the interpreted hierarchy independent of later mutable response maps.
+Map<String, dynamic> immutableTravelObject(Map<String, dynamic> value) {
+  Object? freeze(Object? item) {
+    if (item is List) return List<Object?>.unmodifiable(item.map(freeze));
+    if (item is Map) {
+      return Map<String, dynamic>.unmodifiable({
+        for (final entry in item.entries)
+          entry.key as String: freeze(entry.value),
+      });
+    }
+    return item;
+  }
+
+  return freeze(value) as Map<String, dynamic>;
+}
+
+/// Result history contains facts, never credentials for another request.
+Map<String, dynamic> publicTravelObject(Map<String, dynamic> value) {
+  const requestOnly = {
+    'intent_token',
+    'clarification_token',
+    'consent_offer',
+    'plan_id',
+    'consent_plan_id',
+    'accepted_condition_ids',
+    'request_snapshot',
+    'grant',
+    'accept_unverified',
+  };
+  Object? clean(Object? item) {
+    if (item is List) return item.map(clean).toList();
+    if (item is Map) {
+      return <String, dynamic>{
+        for (final entry in item.entries)
+          if (entry.key is String && !requestOnly.contains(entry.key))
+            entry.key as String: clean(entry.value),
+      };
+    }
+    return item;
+  }
+
+  return clean(value) as Map<String, dynamic>;
+}
+
 class PlaceData {
   final Map<String, dynamic> _json;
   PlaceData.fromJson(Object? value) : _json = jsonObject(value);
@@ -50,7 +169,7 @@ class PlaceData {
   }
 
   Map<String, dynamic> toJson() => {
-    ..._json,
+    ...publicTravelObject(_json),
     'name': name,
     'address': address,
     'category': category,

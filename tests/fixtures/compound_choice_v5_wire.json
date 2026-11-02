@@ -1,0 +1,1134 @@
+{
+  "status": "fixed_contract_for_parallel_implementation",
+  "contract_version": 1,
+  "policy": "places-6e51a45748c2-policy-20261102-v13",
+  "request_intent_version": 1,
+  "note": "Design fixtures, not runtime measurements. Token strings are invalid placeholders. Each fixture denotes its own signed plan/token subject; no real secret is present. Extra existing public place fields may be returned.",
+  "request_fields": {
+    "accept_unverified": "bool default false",
+    "consent_plan_id": "string <=64 chars, exact current signed plan.plan_id for scoped grants",
+    "accepted_condition_ids": "array of unique nonempty strings <=64 chars each, <=25 IDs, default []"
+  },
+  "rules": [
+    "OR bool-only never blanket grants",
+    "nonempty grants require true bool and exact consent_plan_id; all hard unknowns of ONE matching alternative must be granted",
+    "new plan/controls/seed reset consent; current token and request snapshot reused on opt-in",
+    "place history contains no token/plan_id/consent offer or replayable grant",
+    "metadata.unverified_conditions describes returned witnesses; withheld_alternatives is separate",
+    "base safe200 does not open a forced modal; optional action reuses immutable request"
+  ],
+  "fixtures": [
+    {
+      "id": "F01-safe-park-200",
+      "request": {
+        "region": "천안",
+        "transport": "대중교통",
+        "user_lat": 36.8066,
+        "user_lng": 127.1469,
+        "count": 3,
+        "persona_tags": [],
+        "intent_version": 1,
+        "plan_mode": "natural",
+        "seed": 101,
+        "randomize": false,
+        "user_text": "실내 카페 또는 공원",
+        "intent_token": "<opaque-v13-token>",
+        "accept_unverified": false,
+        "accepted_condition_ids": []
+      },
+      "status": 200,
+      "flask_body": {
+        "places": [
+          {
+            "place_id": "synthetic-park",
+            "source_name": "합성 공원",
+            "category": "공원",
+            "travel_explanation": {
+              "stage_id": "s1",
+              "alternative_id": "s1.a2",
+              "alternative_label": "공원",
+              "alternative_quote": "공원",
+              "matched_alternative_ids": [
+                "s1.a2"
+              ],
+              "eligible_alternative_ids": [
+                "s1.a2"
+              ],
+              "satisfied_conditions": [
+                "장소 종류"
+              ],
+              "unverified_conditions": [],
+              "conditions": [],
+              "consent_used": false,
+              "evidence_basis": [
+                "places_db.category",
+                "coordinate_calculation"
+              ]
+            },
+            "name": "합성 공원",
+            "address": "충남 천안시 합성로 1",
+            "lat": 36.8066,
+            "lng": 127.1469
+          }
+        ],
+        "metadata": {
+          "choice_contract_version": 1,
+          "unverified_conditions": [],
+          "user_accepted_unverified": false,
+          "requested_count": 3,
+          "returned_count": 1,
+          "withheld_alternatives": [
+            {
+              "stage_id": "s1",
+              "alternative_id": "s1.a1",
+              "label": "카페",
+              "reason": "required_condition_unknown",
+              "candidate_count": 1,
+              "conditions": [
+                {
+                  "id": "s1.a1.c1",
+                  "field": "indoor",
+                  "value": true,
+                  "required": true,
+                  "quote": "실내",
+                  "source_span": [
+                    0,
+                    2
+                  ],
+                  "source": "sentence",
+                  "label": "카페: 실내 여부 미확인",
+                  "status": "unknown"
+                }
+              ]
+            }
+          ],
+          "consent_offer": {
+            "plan_id": "example-v13-plan-nonce",
+            "alternatives": [
+              {
+                "stage_id": "s1",
+                "alternative_id": "s1.a1",
+                "label": "카페",
+                "reason": "required_condition_unknown",
+                "candidate_count": 1,
+                "conditions": [
+                  {
+                    "id": "s1.a1.c1",
+                    "field": "indoor",
+                    "value": true,
+                    "required": true,
+                    "quote": "실내",
+                    "source_span": [
+                      0,
+                      2
+                    ],
+                    "source": "sentence",
+                    "label": "카페: 실내 여부 미확인",
+                    "status": "unknown"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "node_body": {
+        "success": true,
+        "data": {
+          "places": [
+            {
+              "place_id": "synthetic-park",
+              "source_name": "합성 공원",
+              "category": "공원",
+              "travel_explanation": {
+                "stage_id": "s1",
+                "alternative_id": "s1.a2",
+                "alternative_label": "공원",
+                "alternative_quote": "공원",
+                "matched_alternative_ids": [
+                  "s1.a2"
+                ],
+                "eligible_alternative_ids": [
+                  "s1.a2"
+                ],
+                "satisfied_conditions": [
+                  "장소 종류"
+                ],
+                "unverified_conditions": [],
+                "conditions": [],
+                "consent_used": false,
+                "evidence_basis": [
+                  "places_db.category",
+                  "coordinate_calculation"
+                ]
+              },
+              "name": "합성 공원",
+              "address": "충남 천안시 합성로 1",
+              "lat": 36.8066,
+              "lng": 127.1469
+            }
+          ],
+          "metadata": {
+            "choice_contract_version": 1,
+            "unverified_conditions": [],
+            "user_accepted_unverified": false,
+            "requested_count": 3,
+            "returned_count": 1,
+            "withheld_alternatives": [
+              {
+                "stage_id": "s1",
+                "alternative_id": "s1.a1",
+                "label": "카페",
+                "reason": "required_condition_unknown",
+                "candidate_count": 1,
+                "conditions": [
+                  {
+                    "id": "s1.a1.c1",
+                    "field": "indoor",
+                    "value": true,
+                    "required": true,
+                    "quote": "실내",
+                    "source_span": [
+                      0,
+                      2
+                    ],
+                    "source": "sentence",
+                    "label": "카페: 실내 여부 미확인",
+                    "status": "unknown"
+                  }
+                ]
+              }
+            ],
+            "consent_offer": {
+              "plan_id": "example-v13-plan-nonce",
+              "alternatives": [
+                {
+                  "stage_id": "s1",
+                  "alternative_id": "s1.a1",
+                  "label": "카페",
+                  "reason": "required_condition_unknown",
+                  "candidate_count": 1,
+                  "conditions": [
+                    {
+                      "id": "s1.a1.c1",
+                      "field": "indoor",
+                      "value": true,
+                      "required": true,
+                      "quote": "실내",
+                      "source_span": [
+                        0,
+                        2
+                      ],
+                      "source": "sentence",
+                      "label": "카페: 실내 여부 미확인",
+                      "status": "unknown"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "F02-only-unknown-422",
+      "request": {
+        "region": "천안",
+        "transport": "대중교통",
+        "user_lat": 36.8066,
+        "user_lng": 127.1469,
+        "count": 3,
+        "persona_tags": [],
+        "intent_version": 1,
+        "plan_mode": "natural",
+        "seed": 101,
+        "randomize": false,
+        "user_text": "실내 카페 또는 공원",
+        "intent_token": "<opaque-v13-token>",
+        "accept_unverified": false
+      },
+      "status": 422,
+      "flask_body": {
+        "reason": "unverified_conditions",
+        "metadata": {
+          "choice_contract_version": 1,
+          "unverified_conditions": [
+            {
+              "stage_id": "s1",
+              "alternative_id": "s1.a1",
+              "condition_id": "s1.a1.c1",
+              "label": "카페: 실내 여부 미확인"
+            }
+          ],
+          "consent_offer": {
+            "plan_id": "example-v13-plan-nonce",
+            "alternatives": [
+              {
+                "stage_id": "s1",
+                "alternative_id": "s1.a1",
+                "label": "카페",
+                "reason": "required_condition_unknown",
+                "candidate_count": 1,
+                "conditions": [
+                  {
+                    "id": "s1.a1.c1",
+                    "field": "indoor",
+                    "value": true,
+                    "required": true,
+                    "quote": "실내",
+                    "source_span": [
+                      0,
+                      2
+                    ],
+                    "source": "sentence",
+                    "label": "카페: 실내 여부 미확인",
+                    "status": "unknown"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "error": "필수 조건을 입증할 자료가 없어요. 미확인 대안을 볼지 선택해주세요."
+      },
+      "node_body": {
+        "success": false,
+        "error": {
+          "reason": "unverified_conditions",
+          "metadata": {
+            "choice_contract_version": 1,
+            "unverified_conditions": [
+              {
+                "stage_id": "s1",
+                "alternative_id": "s1.a1",
+                "condition_id": "s1.a1.c1",
+                "label": "카페: 실내 여부 미확인"
+              }
+            ],
+            "consent_offer": {
+              "plan_id": "example-v13-plan-nonce",
+              "alternatives": [
+                {
+                  "stage_id": "s1",
+                  "alternative_id": "s1.a1",
+                  "label": "카페",
+                  "reason": "required_condition_unknown",
+                  "candidate_count": 1,
+                  "conditions": [
+                    {
+                      "id": "s1.a1.c1",
+                      "field": "indoor",
+                      "value": true,
+                      "required": true,
+                      "quote": "실내",
+                      "source_span": [
+                        0,
+                        2
+                      ],
+                      "source": "sentence",
+                      "label": "카페: 실내 여부 미확인",
+                      "status": "unknown"
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          "error": "필수 조건을 입증할 자료가 없어요. 미확인 대안을 볼지 선택해주세요."
+        }
+      }
+    },
+    {
+      "id": "F03-cafe-scoped-200",
+      "request": {
+        "region": "천안",
+        "transport": "대중교통",
+        "user_lat": 36.8066,
+        "user_lng": 127.1469,
+        "count": 3,
+        "persona_tags": [],
+        "intent_version": 1,
+        "plan_mode": "natural",
+        "seed": 101,
+        "randomize": false,
+        "user_text": "실내 카페 또는 공원",
+        "intent_token": "<opaque-v13-token>",
+        "accept_unverified": true,
+        "consent_plan_id": "example-v13-plan-nonce",
+        "accepted_condition_ids": [
+          "s1.a1.c1"
+        ]
+      },
+      "status": 200,
+      "flask_body": {
+        "places": [
+          {
+            "place_id": "synthetic-cafe",
+            "source_name": "합성 카페",
+            "category": "카페",
+            "travel_explanation": {
+              "stage_id": "s1",
+              "alternative_id": "s1.a1",
+              "alternative_label": "카페",
+              "alternative_quote": "실내 카페",
+              "matched_alternative_ids": [
+                "s1.a1"
+              ],
+              "eligible_alternative_ids": [
+                "s1.a1"
+              ],
+              "satisfied_conditions": [
+                "장소 종류"
+              ],
+              "unverified_conditions": [
+                "실내 여부 미확인"
+              ],
+              "conditions": [
+                {
+                  "id": "s1.a1.c1",
+                  "field": "indoor",
+                  "value": true,
+                  "required": true,
+                  "quote": "실내",
+                  "source_span": [
+                    0,
+                    2
+                  ],
+                  "source": "sentence",
+                  "label": "실내 여부 미확인",
+                  "status": "unknown",
+                  "accepted_as_unknown": true
+                }
+              ],
+              "consent_used": true,
+              "evidence_basis": [
+                "places_db.category",
+                "coordinate_calculation"
+              ]
+            },
+            "name": "합성 카페",
+            "address": "충남 천안시 합성로 1",
+            "lat": 36.806700000000006,
+            "lng": 127.1469
+          }
+        ],
+        "metadata": {
+          "choice_contract_version": 1,
+          "withheld_alternatives": [],
+          "consent_offer": null,
+          "unverified_conditions": [
+            {
+              "stage_id": "s1",
+              "alternative_id": "s1.a1",
+              "condition_id": "s1.a1.c1",
+              "label": "카페: 실내 여부 미확인"
+            }
+          ],
+          "user_accepted_unverified": true,
+          "requested_count": 3,
+          "returned_count": 1
+        }
+      },
+      "node_body": {
+        "success": true,
+        "data": {
+          "places": [
+            {
+              "place_id": "synthetic-cafe",
+              "source_name": "합성 카페",
+              "category": "카페",
+              "travel_explanation": {
+                "stage_id": "s1",
+                "alternative_id": "s1.a1",
+                "alternative_label": "카페",
+                "alternative_quote": "실내 카페",
+                "matched_alternative_ids": [
+                  "s1.a1"
+                ],
+                "eligible_alternative_ids": [
+                  "s1.a1"
+                ],
+                "satisfied_conditions": [
+                  "장소 종류"
+                ],
+                "unverified_conditions": [
+                  "실내 여부 미확인"
+                ],
+                "conditions": [
+                  {
+                    "id": "s1.a1.c1",
+                    "field": "indoor",
+                    "value": true,
+                    "required": true,
+                    "quote": "실내",
+                    "source_span": [
+                      0,
+                      2
+                    ],
+                    "source": "sentence",
+                    "label": "실내 여부 미확인",
+                    "status": "unknown",
+                    "accepted_as_unknown": true
+                  }
+                ],
+                "consent_used": true,
+                "evidence_basis": [
+                  "places_db.category",
+                  "coordinate_calculation"
+                ]
+              },
+              "name": "합성 카페",
+              "address": "충남 천안시 합성로 1",
+              "lat": 36.806700000000006,
+              "lng": 127.1469
+            }
+          ],
+          "metadata": {
+            "choice_contract_version": 1,
+            "withheld_alternatives": [],
+            "consent_offer": null,
+            "unverified_conditions": [
+              {
+                "stage_id": "s1",
+                "alternative_id": "s1.a1",
+                "condition_id": "s1.a1.c1",
+                "label": "카페: 실내 여부 미확인"
+              }
+            ],
+            "user_accepted_unverified": true,
+            "requested_count": 3,
+            "returned_count": 1
+          }
+        }
+      }
+    },
+    {
+      "id": "F04-partial-grant-200",
+      "request": {
+        "region": "천안",
+        "transport": "대중교통",
+        "user_lat": 36.8066,
+        "user_lng": 127.1469,
+        "count": 3,
+        "persona_tags": [],
+        "intent_version": 1,
+        "plan_mode": "natural",
+        "seed": 101,
+        "randomize": false,
+        "user_text": "실내 카페 또는 야외 공원",
+        "intent_token": "<opaque-v13-token>",
+        "accept_unverified": true,
+        "consent_plan_id": "example-v13-plan-nonce",
+        "accepted_condition_ids": [
+          "s1.a1.c1"
+        ]
+      },
+      "status": 200,
+      "flask_body": {
+        "places": [
+          {
+            "place_id": "synthetic-cafe",
+            "source_name": "합성 카페",
+            "category": "카페",
+            "travel_explanation": {
+              "stage_id": "s1",
+              "alternative_id": "s1.a1",
+              "alternative_label": "카페",
+              "alternative_quote": "실내 카페",
+              "matched_alternative_ids": [
+                "s1.a1"
+              ],
+              "eligible_alternative_ids": [
+                "s1.a1"
+              ],
+              "satisfied_conditions": [
+                "장소 종류"
+              ],
+              "unverified_conditions": [
+                "실내 여부 미확인"
+              ],
+              "conditions": [
+                {
+                  "id": "s1.a1.c1",
+                  "field": "indoor",
+                  "value": true,
+                  "required": true,
+                  "quote": "실내",
+                  "source_span": [
+                    0,
+                    2
+                  ],
+                  "source": "sentence",
+                  "label": "실내 여부 미확인",
+                  "status": "unknown",
+                  "accepted_as_unknown": true
+                }
+              ],
+              "consent_used": true,
+              "evidence_basis": [
+                "places_db.category",
+                "coordinate_calculation"
+              ]
+            },
+            "name": "합성 카페",
+            "address": "충남 천안시 합성로 1",
+            "lat": 36.806700000000006,
+            "lng": 127.1469
+          }
+        ],
+        "metadata": {
+          "choice_contract_version": 1,
+          "withheld_alternatives": [
+            {
+              "stage_id": "s1",
+              "alternative_id": "s1.a2",
+              "label": "공원",
+              "reason": "required_condition_unknown",
+              "candidate_count": 1,
+              "conditions": [
+                {
+                  "id": "s1.a2.c1",
+                  "field": "outdoor",
+                  "value": true,
+                  "required": true,
+                  "quote": "야외",
+                  "source_span": [
+                    9,
+                    11
+                  ],
+                  "source": "sentence",
+                  "label": "공원: 야외 여부 미확인",
+                  "status": "unknown"
+                }
+              ]
+            }
+          ],
+          "consent_offer": {
+            "plan_id": "example-v13-plan-nonce",
+            "alternatives": [
+              {
+                "stage_id": "s1",
+                "alternative_id": "s1.a2",
+                "label": "공원",
+                "reason": "required_condition_unknown",
+                "candidate_count": 1,
+                "conditions": [
+                  {
+                    "id": "s1.a2.c1",
+                    "field": "outdoor",
+                    "value": true,
+                    "required": true,
+                    "quote": "야외",
+                    "source_span": [
+                      9,
+                      11
+                    ],
+                    "source": "sentence",
+                    "label": "공원: 야외 여부 미확인",
+                    "status": "unknown"
+                  }
+                ]
+              }
+            ]
+          },
+          "unverified_conditions": [
+            {
+              "stage_id": "s1",
+              "alternative_id": "s1.a1",
+              "condition_id": "s1.a1.c1",
+              "label": "카페: 실내 여부 미확인"
+            }
+          ],
+          "user_accepted_unverified": true,
+          "requested_count": 3,
+          "returned_count": 1
+        }
+      },
+      "node_body": {
+        "success": true,
+        "data": {
+          "places": [
+            {
+              "place_id": "synthetic-cafe",
+              "source_name": "합성 카페",
+              "category": "카페",
+              "travel_explanation": {
+                "stage_id": "s1",
+                "alternative_id": "s1.a1",
+                "alternative_label": "카페",
+                "alternative_quote": "실내 카페",
+                "matched_alternative_ids": [
+                  "s1.a1"
+                ],
+                "eligible_alternative_ids": [
+                  "s1.a1"
+                ],
+                "satisfied_conditions": [
+                  "장소 종류"
+                ],
+                "unverified_conditions": [
+                  "실내 여부 미확인"
+                ],
+                "conditions": [
+                  {
+                    "id": "s1.a1.c1",
+                    "field": "indoor",
+                    "value": true,
+                    "required": true,
+                    "quote": "실내",
+                    "source_span": [
+                      0,
+                      2
+                    ],
+                    "source": "sentence",
+                    "label": "실내 여부 미확인",
+                    "status": "unknown",
+                    "accepted_as_unknown": true
+                  }
+                ],
+                "consent_used": true,
+                "evidence_basis": [
+                  "places_db.category",
+                  "coordinate_calculation"
+                ]
+              },
+              "name": "합성 카페",
+              "address": "충남 천안시 합성로 1",
+              "lat": 36.806700000000006,
+              "lng": 127.1469
+            }
+          ],
+          "metadata": {
+            "choice_contract_version": 1,
+            "withheld_alternatives": [
+              {
+                "stage_id": "s1",
+                "alternative_id": "s1.a2",
+                "label": "공원",
+                "reason": "required_condition_unknown",
+                "candidate_count": 1,
+                "conditions": [
+                  {
+                    "id": "s1.a2.c1",
+                    "field": "outdoor",
+                    "value": true,
+                    "required": true,
+                    "quote": "야외",
+                    "source_span": [
+                      9,
+                      11
+                    ],
+                    "source": "sentence",
+                    "label": "공원: 야외 여부 미확인",
+                    "status": "unknown"
+                  }
+                ]
+              }
+            ],
+            "consent_offer": {
+              "plan_id": "example-v13-plan-nonce",
+              "alternatives": [
+                {
+                  "stage_id": "s1",
+                  "alternative_id": "s1.a2",
+                  "label": "공원",
+                  "reason": "required_condition_unknown",
+                  "candidate_count": 1,
+                  "conditions": [
+                    {
+                      "id": "s1.a2.c1",
+                      "field": "outdoor",
+                      "value": true,
+                      "required": true,
+                      "quote": "야외",
+                      "source_span": [
+                        9,
+                        11
+                      ],
+                      "source": "sentence",
+                      "label": "공원: 야외 여부 미확인",
+                      "status": "unknown"
+                    }
+                  ]
+                }
+              ]
+            },
+            "unverified_conditions": [
+              {
+                "stage_id": "s1",
+                "alternative_id": "s1.a1",
+                "condition_id": "s1.a1.c1",
+                "label": "카페: 실내 여부 미확인"
+              }
+            ],
+            "user_accepted_unverified": true,
+            "requested_count": 3,
+            "returned_count": 1
+          }
+        }
+      }
+    },
+    {
+      "id": "F05-preview-one-visit",
+      "request": {
+        "region": "천안",
+        "transport": "대중교통",
+        "user_lat": 36.8066,
+        "user_lng": 127.1469,
+        "count": 3,
+        "persona_tags": [],
+        "intent_version": 1,
+        "plan_mode": "natural",
+        "seed": 101,
+        "randomize": false,
+        "user_text": "실내 카페 또는 공원",
+        "mode": "spot"
+      },
+      "status": 200,
+      "flask_body": {
+        "travel_request": {
+          "schema_version": 1,
+          "plan_id": "example-v13-plan-nonce",
+          "source_text": "실내 카페 또는 공원",
+          "companion": null,
+          "stages": [
+            {
+              "id": "s1",
+              "activity": "카페 / 공원 중 한 곳",
+              "quote": "실내 카페 또는 공원",
+              "source_span": [
+                0,
+                11
+              ],
+              "category_filters": [
+                "카페",
+                "공원"
+              ],
+              "conditions": [],
+              "preferences": [],
+              "choice_cardinality": 1,
+              "alternatives": [
+                {
+                  "id": "s1.a1",
+                  "quote": "실내 카페",
+                  "source_span": [
+                    0,
+                    5
+                  ],
+                  "category_filters": [
+                    "카페"
+                  ],
+                  "conditions": [
+                    {
+                      "id": "s1.a1.c1",
+                      "field": "indoor",
+                      "value": true,
+                      "required": true,
+                      "quote": "실내",
+                      "source_span": [
+                        0,
+                        2
+                      ],
+                      "source": "sentence"
+                    }
+                  ],
+                  "preferences": []
+                },
+                {
+                  "id": "s1.a2",
+                  "quote": "공원",
+                  "source_span": [
+                    9,
+                    11
+                  ],
+                  "category_filters": [
+                    "공원"
+                  ],
+                  "conditions": [],
+                  "preferences": []
+                }
+              ]
+            }
+          ],
+          "exclusions": [],
+          "ambiguities": [],
+          "unsupported": [],
+          "requested_visit_count": null,
+          "requested_result_count": null,
+          "interpretation_method": "source_choice_contract"
+        },
+        "intent_token": "<opaque-v13-signed-token>",
+        "clarification_required": false,
+        "mode_switch_required": false,
+        "target_mode": "spot",
+        "target_count": 3
+      },
+      "node_body": {
+        "success": true,
+        "data": {
+          "travel_request": {
+            "schema_version": 1,
+            "plan_id": "example-v13-plan-nonce",
+            "source_text": "실내 카페 또는 공원",
+            "companion": null,
+            "stages": [
+              {
+                "id": "s1",
+                "activity": "카페 / 공원 중 한 곳",
+                "quote": "실내 카페 또는 공원",
+                "source_span": [
+                  0,
+                  11
+                ],
+                "category_filters": [
+                  "카페",
+                  "공원"
+                ],
+                "conditions": [],
+                "preferences": [],
+                "choice_cardinality": 1,
+                "alternatives": [
+                  {
+                    "id": "s1.a1",
+                    "quote": "실내 카페",
+                    "source_span": [
+                      0,
+                      5
+                    ],
+                    "category_filters": [
+                      "카페"
+                    ],
+                    "conditions": [
+                      {
+                        "id": "s1.a1.c1",
+                        "field": "indoor",
+                        "value": true,
+                        "required": true,
+                        "quote": "실내",
+                        "source_span": [
+                          0,
+                          2
+                        ],
+                        "source": "sentence"
+                      }
+                    ],
+                    "preferences": []
+                  },
+                  {
+                    "id": "s1.a2",
+                    "quote": "공원",
+                    "source_span": [
+                      9,
+                      11
+                    ],
+                    "category_filters": [
+                      "공원"
+                    ],
+                    "conditions": [],
+                    "preferences": []
+                  }
+                ]
+              }
+            ],
+            "exclusions": [],
+            "ambiguities": [],
+            "unsupported": [],
+            "requested_visit_count": null,
+            "requested_result_count": null,
+            "interpretation_method": "source_choice_contract"
+          },
+          "intent_token": "<opaque-v13-signed-token>",
+          "clarification_required": false,
+          "mode_switch_required": false,
+          "target_mode": "spot",
+          "target_count": 3
+        }
+      }
+    }
+  ],
+  "errors": [
+    {
+      "id": "E01-old-bool",
+      "request": {
+        "region": "천안",
+        "transport": "대중교통",
+        "user_lat": 36.8066,
+        "user_lng": 127.1469,
+        "count": 3,
+        "persona_tags": [],
+        "intent_version": 1,
+        "plan_mode": "natural",
+        "seed": 101,
+        "randomize": false,
+        "user_text": "실내 카페 또는 공원",
+        "intent_token": "<opaque-v13-token>",
+        "accept_unverified": true
+      },
+      "status": 422,
+      "flask_body": {
+        "error": "선택지별 미확인 조건을 선택해 확인해주세요.",
+        "reason": "intent_conflict",
+        "metadata": {
+          "failure_code": "intent_consent_scope_required"
+        }
+      },
+      "node_body": {
+        "success": false,
+        "error": {
+          "error": "선택지별 미확인 조건을 선택해 확인해주세요.",
+          "reason": "intent_conflict",
+          "metadata": {
+            "failure_code": "intent_consent_scope_required"
+          }
+        }
+      }
+    },
+    {
+      "id": "E02-foreign-plan",
+      "request": {
+        "region": "천안",
+        "transport": "대중교통",
+        "user_lat": 36.8066,
+        "user_lng": 127.1469,
+        "count": 3,
+        "persona_tags": [],
+        "intent_version": 1,
+        "plan_mode": "natural",
+        "seed": 101,
+        "randomize": false,
+        "user_text": "실내 카페 또는 공원",
+        "intent_token": "<opaque-v13-token>",
+        "accept_unverified": true,
+        "consent_plan_id": "another-plan",
+        "accepted_condition_ids": [
+          "s1.a1.c1"
+        ]
+      },
+      "status": 400,
+      "flask_body": {
+        "error": "여행 요청을 다시 확인해주세요.",
+        "reason": "intent_expired"
+      },
+      "node_body": {
+        "success": false,
+        "error": {
+          "error": "여행 요청을 다시 확인해주세요.",
+          "reason": "intent_expired"
+        }
+      }
+    },
+    {
+      "id": "E03-unknown-condition",
+      "request": {
+        "region": "천안",
+        "transport": "대중교통",
+        "user_lat": 36.8066,
+        "user_lng": 127.1469,
+        "count": 3,
+        "persona_tags": [],
+        "intent_version": 1,
+        "plan_mode": "natural",
+        "seed": 101,
+        "randomize": false,
+        "user_text": "실내 카페 또는 공원",
+        "intent_token": "<opaque-v13-token>",
+        "accept_unverified": true,
+        "consent_plan_id": "example-v13-plan-nonce",
+        "accepted_condition_ids": [
+          "s9.a9.c9"
+        ]
+      },
+      "status": 422,
+      "flask_body": {
+        "error": "동의한 조건 범위를 다시 확인해주세요.",
+        "reason": "intent_conflict",
+        "metadata": {
+          "failure_code": "intent_consent_scope"
+        }
+      },
+      "node_body": {
+        "success": false,
+        "error": {
+          "error": "동의한 조건 범위를 다시 확인해주세요.",
+          "reason": "intent_conflict",
+          "metadata": {
+            "failure_code": "intent_consent_scope"
+          }
+        }
+      }
+    },
+    {
+      "id": "E04-invalid-type",
+      "request": {
+        "region": "천안",
+        "transport": "대중교통",
+        "user_lat": 36.8066,
+        "user_lng": 127.1469,
+        "count": 3,
+        "persona_tags": [],
+        "intent_version": 1,
+        "plan_mode": "natural",
+        "seed": 101,
+        "randomize": false,
+        "user_text": "실내 카페 또는 공원",
+        "intent_token": "<opaque-v13-token>",
+        "accepted_condition_ids": true
+      },
+      "status": 400,
+      "flask_body": {
+        "error": "미확인 조건 선택을 확인해주세요.",
+        "reason": "invalid_request"
+      },
+      "node_body": {
+        "success": false,
+        "error": {
+          "error": "미확인 조건 선택을 확인해주세요.",
+          "reason": "invalid_request"
+        }
+      }
+    },
+    {
+      "id": "E05-no-intent-token",
+      "request": {
+        "region": "천안",
+        "transport": "대중교통",
+        "user_lat": 36.8066,
+        "user_lng": 127.1469,
+        "count": 3,
+        "persona_tags": [],
+        "intent_version": 1,
+        "plan_mode": "natural",
+        "seed": 101,
+        "randomize": false,
+        "user_text": "실내 카페 또는 공원",
+        "accept_unverified": true,
+        "accepted_condition_ids": [
+          "s1.a1.c1"
+        ]
+      },
+      "status": 400,
+      "flask_body": {
+        "error": "여행 요청을 다시 확인해주세요.",
+        "reason": "intent_expired"
+      },
+      "node_body": {
+        "success": false,
+        "error": {
+          "error": "여행 요청을 다시 확인해주세요.",
+          "reason": "intent_expired"
+        }
+      }
+    }
+  ],
+  "capacity": {
+    "stages": 5,
+    "alternatives_per_stage": 3,
+    "total_condition_atoms_per_plan": 25,
+    "intent_token_chars": 12000,
+    "request_body_kib": 16,
+    "max_candidates": 30,
+    "model_calls": "Source-complete interpretation0; otherwise original at most1 bounded interpretation; original selection at most1; no extra retries.",
+    "on_excess": "reject explicitly, never truncate; boundary fixtures required"
+  }
+}

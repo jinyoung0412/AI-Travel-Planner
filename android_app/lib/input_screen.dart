@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'location_service.dart';
+import 'choice_condition_notice.dart';
 import 'activity_choice_dialog.dart';
 import 'service_region_dialog.dart';
 import 'transit_hubs.dart';
@@ -43,6 +44,7 @@ class _InputScreenState extends State<InputScreen> {
   int _spotCount = 3;
   List<String> _slotTypes = [];
   bool _isLoading = false;
+  bool _scopeInFlight = false;
   bool _isTagLoading = false;
   double? _gpsLat;
   double? _gpsLng;
@@ -469,8 +471,16 @@ class _InputScreenState extends State<InputScreen> {
             return;
           }
         }
+        final consentKind = classifyTravelConsentPlan(plan);
+        if (consentKind == TravelConsentPlanKind.invalid) {
+          _showRecommendationError('여행 문장의 방문 구성을 확인하지 못했어요. 다시 입력해주세요.');
+          return;
+        }
         request = request.reviewed(
           token: preview['intent_token'] as String,
+          planId: plan['plan_id'] is String ? plan['plan_id'] as String : null,
+          travelRequest: plan,
+          hasChoiceAlternatives: consentKind == TravelConsentPlanKind.choice,
           targetMode: preview['target_mode'] as String,
           targetCount: preview['target_count'] as int,
         );
@@ -479,43 +489,71 @@ class _InputScreenState extends State<InputScreen> {
       if (!mounted || revision != _requestRevision) return;
       if (res?['reason'] == 'unverified_conditions') {
         final metadata = jsonObject(res?['metadata'] ?? {});
-        final labels = (metadata['unverified_conditions'] as List? ?? [])
-            .whereType<Map>()
-            .map((c) => c['label'])
-            .join(', ');
-        final approved =
-            await showDialog<bool>(
-              context: context,
-              builder: (context) => AlertDialog(
-                title: const Text('조건을 바꿔볼까요?'),
-                content: Text(
-                  labels.isEmpty
-                      ? '일부 조건을 제외하고 다시 찾아볼까요?'
-                      : '$labels 조건을 제외하고 다시 찾아볼까요?',
-                ),
-                actions: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(context, false),
-                    child: const Text('조건 유지'),
-                  ),
-                  TextButton(
-                    onPressed: () => Navigator.pop(context, true),
-                    child: const Text('다시 찾기'),
-                  ),
-                ],
-              ),
-            ) ??
-            false;
-        if (!mounted || revision != _requestRevision) return;
-        if (!approved) {
-          setState(() => _currentStep = 1);
+        final consentKind = classifyTravelConsentPlan(request.travelRequest);
+        final newContract = metadata.containsKey('choice_contract_version');
+        if (consentKind == TravelConsentPlanKind.invalid ||
+            (newContract && metadata['choice_contract_version'] != 1) ||
+            consentKind == TravelConsentPlanKind.unknown) {
+          _showRecommendationError('대안의 동의 범위를 확인하지 못했어요. 문장을 다시 입력해주세요.');
           return;
         }
-        request = request.reviewed(
-          token: request.intentToken!,
-          unverified: true,
-        );
-        res = await widget.source.recommend(request);
+        if (consentKind == TravelConsentPlanKind.choice) {
+          final offer = readChoiceConsentOffer(
+            metadata,
+            travelRequest: request.travelRequest,
+          );
+          if (offer == null || offer.planId != request.planId) {
+            _showRecommendationError('대안의 동의 범위를 확인하지 못했어요. 문장을 다시 입력해주세요.');
+            return;
+          }
+          final ids = await chooseUnverifiedConditions(context, offer);
+          if (!mounted || revision != _requestRevision || ids == null) return;
+          request = request.reviewed(
+            token: request.intentToken!,
+            unverified: true,
+            consentPlanId: offer.planId,
+            acceptedConditionIds: ids,
+          );
+          res = await widget.source.recommend(request);
+        } else {
+          final labels = (metadata['unverified_conditions'] as List? ?? [])
+              .whereType<Map>()
+              .map((c) => c['label'])
+              .join(', ');
+          final approved =
+              await showDialog<bool>(
+                context: context,
+                builder: (context) => AlertDialog(
+                  title: const Text('조건을 바꿔볼까요?'),
+                  content: Text(
+                    labels.isEmpty
+                        ? '일부 조건을 제외하고 다시 찾아볼까요?'
+                        : '$labels 조건을 제외하고 다시 찾아볼까요?',
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context, false),
+                      child: const Text('조건 유지'),
+                    ),
+                    TextButton(
+                      onPressed: () => Navigator.pop(context, true),
+                      child: const Text('다시 찾기'),
+                    ),
+                  ],
+                ),
+              ) ??
+              false;
+          if (!mounted || revision != _requestRevision) return;
+          if (!approved) {
+            setState(() => _currentStep = 1);
+            return;
+          }
+          request = request.reviewed(
+            token: request.intentToken!,
+            unverified: true,
+          );
+          res = await widget.source.recommend(request);
+        }
       }
       if (!mounted || revision != _requestRevision) return;
 
@@ -563,50 +601,7 @@ class _InputScreenState extends State<InputScreen> {
         return;
       }
 
-      final data = RecommendationData.fromJson(res);
-
-      if (request.mode == 'spot') {
-        final places = data.places;
-        _openResults(
-          SpotResultScreen(
-            places: places,
-            sameAsPrevious:
-                _lastResults is SpotResultScreen &&
-                samePlaceComposition(
-                  places,
-                  (_lastResults as SpotResultScreen).places,
-                ),
-            requestedCount: request.count,
-            metadata: data.metadata,
-          ),
-          revision,
-          activityChoice: request.activityChoice,
-        );
-      } else {
-        final courses = data.courses;
-        final metadata = data.metadata;
-        final metrics = data.courseMetrics;
-        _openResults(
-          CourseResultScreen(
-            courses: courses,
-            sameAsPrevious:
-                _lastResults is CourseResultScreen &&
-                sameCourseComposition(
-                  courses,
-                  (_lastResults as CourseResultScreen).courses
-                      .map(jsonObjects)
-                      .toList(),
-                ),
-            requestedCount: request.count,
-            region: request.region,
-            metadata: metadata,
-            courseMetrics: metrics,
-            transport: request.transport,
-          ),
-          revision,
-          activityChoice: request.activityChoice,
-        );
-      }
+      _showRecommendation(request, res, revision);
     } catch (_) {
       if (!mounted || revision != _requestRevision) return;
       _showRecommendationError('추천 결과를 불러오지 못했어요. 다시 시도해주세요.');
@@ -614,6 +609,131 @@ class _InputScreenState extends State<InputScreen> {
       if (mounted && revision == _requestRevision) {
         setState(() => _isLoading = false);
       }
+    }
+  }
+
+  void _showRecommendation(
+    RecommendationRequest request,
+    Map<String, dynamic> res,
+    int revision, {
+    bool replaceCurrent = false,
+  }) {
+    final data = RecommendationData.fromJson(res);
+    final proposedOffer = readChoiceConsentOffer(
+      data.metadata,
+      travelRequest: request.travelRequest,
+    );
+    final offer = proposedOffer?.planId == request.planId
+        ? proposedOffer
+        : null;
+    Future<void> include(BuildContext resultContext) =>
+        _includeUnverified(resultContext, request, offer!, revision);
+
+    if (request.mode == 'spot') {
+      final places = data.places;
+      _openResults(
+        SpotResultScreen(
+          places: places,
+          sameAsPrevious:
+              _lastResults is SpotResultScreen &&
+              samePlaceComposition(
+                places,
+                (_lastResults as SpotResultScreen).places,
+              ),
+          requestedCount: request.count,
+          metadata: data.metadata,
+          consentOffer: offer,
+          onIncludeUnverified: offer == null ? null : include,
+        ),
+        revision,
+        activityChoice: request.activityChoice,
+        replaceCurrent: replaceCurrent,
+      );
+    } else {
+      final courses = data.courses;
+      final metadata = data.metadata;
+      final metrics = data.courseMetrics;
+      _openResults(
+        CourseResultScreen(
+          courses: courses,
+          sameAsPrevious:
+              _lastResults is CourseResultScreen &&
+              sameCourseComposition(
+                courses,
+                (_lastResults as CourseResultScreen).courses
+                    .map(jsonObjects)
+                    .toList(),
+              ),
+          requestedCount: request.count,
+          region: request.region,
+          metadata: metadata,
+          consentOffer: offer,
+          onIncludeUnverified: offer == null ? null : include,
+          courseMetrics: metrics,
+          transport: request.transport,
+        ),
+        revision,
+        activityChoice: request.activityChoice,
+        replaceCurrent: replaceCurrent,
+      );
+    }
+  }
+
+  Future<void> _includeUnverified(
+    BuildContext resultContext,
+    RecommendationRequest request,
+    ChoiceConsentOffer offer,
+    int revision,
+  ) async {
+    final route = ModalRoute.of(resultContext);
+    bool current() =>
+        mounted &&
+        resultContext.mounted &&
+        route?.isCurrent == true &&
+        revision == _requestRevision &&
+        request.cancellation?.isCancelled != true;
+    if (_scopeInFlight || !current()) return;
+    _scopeInFlight = true;
+    try {
+      final ids = await chooseUnverifiedConditions(resultContext, offer);
+      if (!current() || ids == null || ids.isEmpty) return;
+      final scoped = request.reviewed(
+        token: request.intentToken!,
+        unverified: true,
+        consentPlanId: offer.planId,
+        acceptedConditionIds: {
+          ...request.acceptedConditionIds,
+          ...ids,
+        }.toList(),
+      );
+      var finished = false;
+      route!.popped.then((_) {
+        if (!finished) scoped.cancellation?.cancel();
+      });
+      final Map<String, dynamic>? result;
+      try {
+        result = await widget.source.recommend(scoped);
+      } finally {
+        finished = true;
+      }
+      if (!current() || !resultContext.mounted) return;
+      if (result == null || result.containsKey('error')) {
+        ScaffoldMessenger.of(resultContext).showSnackBar(
+          SnackBar(
+            content: Text('${result?['error'] ?? '미확인 대안을 불러오지 못했어요.'}'),
+          ),
+        );
+        return;
+      }
+      _showRecommendation(scoped, result, revision, replaceCurrent: true);
+    } catch (_) {
+      if (current() && resultContext.mounted) {
+        ScaffoldMessenger.of(
+          resultContext,
+        ).showSnackBar(const SnackBar(content: Text('미확인 대안을 불러오지 못했어요.')));
+      }
+    } finally {
+      _scopeInFlight = false;
     }
   }
 
@@ -654,6 +774,7 @@ class _InputScreenState extends State<InputScreen> {
     int revision, {
     VoidCallback? restoreControls,
     String? activityChoice,
+    bool replaceCurrent = false,
   }) {
     final restore = restoreControls ?? _captureResultControls();
     // Retain only the latest successful result. A failed refresh or cancelled
@@ -662,10 +783,11 @@ class _InputScreenState extends State<InputScreen> {
     _lastResultActivity = activityChoice;
     _restoreLastResultControls = restore;
     ScaffoldMessenger.of(context).hideCurrentSnackBar();
-    Navigator.push<ResultAction>(
-      context,
-      MaterialPageRoute(builder: (_) => screen),
-    ).then((action) {
+    final route = MaterialPageRoute<ResultAction>(builder: (_) => screen);
+    final navigation = replaceCurrent
+        ? Navigator.pushReplacement<ResultAction, ResultAction>(context, route)
+        : Navigator.push<ResultAction>(context, route);
+    navigation.then((action) {
       if (!mounted || revision != _requestRevision || action == null) return;
       restore();
       if (action == ResultAction.edit) {

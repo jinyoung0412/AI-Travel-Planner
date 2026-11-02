@@ -36,7 +36,10 @@ from selection_wire import MAX_OUTPUT_TOKENS as SELECTION_OUTPUT_TOKENS
 from intent_context import (normalize_context, context_only, grounded_tags, source_preferences,
                             positive_context_matches)
 from intent_recovery import literal_plan
-from literal_conditions import validate_source_conditions, validate_alternative_condition_scope
+from literal_conditions import (validate_source_conditions, validate_alternative_condition_scope,
+                                validate_choice_topology)
+import compound_choice
+import alternative_policy
 from catalogue_cache import CatalogueCache, database_version
 from service_area import filter_service_candidates, candidate_city
 from recommendation_context import build_context, apply_context, order_spots, context_cost, resolve_generic_meal_ambiguities
@@ -321,12 +324,17 @@ def _intent_error(exc, **extra):
     return jsonify(error=str(exc), reason=exc.reason, **extra), exc.status
 
 
-def _validate_alternative_source(text):
+def _validate_alternative_source(text, plan=None):
     try:
+        expected = compound_choice.source_plan(text, _category_mentions(text), _known_categories())
+        if expected and plan is not None:
+            compound_choice.validate_source_binding(plan, expected, text)
+            return
         validate_alternative_condition_scope(text, _category_mentions(text))
     except ValueError as error:
         if str(error) != 'intent_alternative_condition_scope':
-            raise
+            raise intent.IntentError('intent_conflict', '선택 범위와 조건을 다시 확인해주세요.',
+                failure_code=intent.interpretation_failure_code(error)) from None
         raise intent.IntentError('intent_conflict',
             '선택지마다 필수 조건이 달라 함께 확인할 수 없어요. '
             '원하는 활동 하나를 골라, 그 활동의 조건과 함께 다시 입력해주세요.',
@@ -337,7 +345,15 @@ def _interpret(data, mode):
     if not data['user_text']:
         raise intent.IntentError('intent_conflict', '원하는 여행을 문장으로 입력해주세요.')
     source_text = data['user_text']
-    # This source-only limit is knowable before paying for interpretation.
+    try:
+        compiled = compound_choice.source_plan(source_text, _category_mentions(source_text), _known_categories())
+    except ValueError as error:
+        raise intent.IntentError('intent_conflict', '선택 범위와 조건을 확인해주세요.',
+            failure_code=intent.interpretation_failure_code(error)) from None
+    if compiled and not data.get('activity_choice') and not data.get('clarification_token'):
+        plan = compound_choice.validate_compiled(compiled, source_text, _known_categories(), intent.validate_interpretation)
+        return intent.apply_controls(plan, data, mode)
+    # Unproven source requirements still fail closed, without a model retry.
     _validate_alternative_source(source_text)
     interpretation_text = source_text
     original = None
@@ -487,6 +503,7 @@ def _validate_literal_intent(plan, text):
         if (not positive.intersection(selected) if len(positive) > 1
                 else not positive.issubset(selected)):
             raise ValueError('intent_dropped_kind')
+    validate_choice_topology(plan, text, _category_mentions(text), _known_categories())
     for stage in plan['stages']:
         scope = stage.get('quote') or (text if len(plan['stages']) == 1 else '')
         explicit = _positive_category_mentions(scope)
@@ -535,10 +552,12 @@ def _recommend_intent(data, mode):
     started = time.monotonic()
     try:
         if data.get('accept_unverified') and not data.get('intent_token'):
-            raise intent.IntentError('intent_expired', '미확인 대안을 보기 전에 여행 해석을 확인해주세요.', 400)
+            raise intent.IntentError('intent_expired', '여행 요청을 다시 확인해주세요.' if data.get('accepted_condition_ids')
+                else '미확인 대안을 보기 전에 여행 해석을 확인해주세요.', 400)
         plan = (intent.read_plan(data['intent_token'], data, mode) if data.get('intent_token')
                 else _interpret(data, mode))
-        _validate_alternative_source(data['user_text'])
+        _validate_alternative_source(data['user_text'], plan)
+        grants = alternative_policy.grant_ids(plan, data, intent.IntentError)
         if not plan['stages']:
             raise intent.IntentError('activity_clarification_required', '먼저 원하는 활동을 선택하고 여행 문장을 확인해주세요.')
         base = dict(travel_request=plan, constraints_relaxed=[],
@@ -568,10 +587,15 @@ def _recommend_intent(data, mode):
         df, context_metadata = apply_context(df, context)
         df = add_scores(df, [])
         pools, eligible_counts, global_spot = [], [], None
+        withheld, potential_pools = [], []
         full_course_pools = []
         for i, stage in enumerate(plan['stages']):
             stage_df = df.copy()
             stage_df['_request_context_cost'] = [context_cost(r, stage['id']) for r in df.to_dict('records')]
+            stage_df, potential_df, pending = alternative_policy.filter_stage(stage_df, stage, grants)
+            withheld.extend(pending)
+            potential_pools.append([dict(row=r, public=intent.candidate_record(r, stage, intent.DATA_VERSION))
+                                    for r in intent.distinct_visits(potential_df).to_dict('records')])
             size = intent.MAX_CANDIDATES // len(plan['stages']) + (i < intent.MAX_CANDIDATES % len(plan['stages']))
             rows = intent.pool_for_stage(stage_df, stage['category_filters'], size, filter_keywords, eligible_counts)
             if mode == 'course':
@@ -632,22 +656,43 @@ def _recommend_intent(data, mode):
                     request_key=intent.request_key(data, mode, plan, pools),
                     limitation='저장된 장소 분류와 좌표의 직선거리가 근거입니다. 현장 상태·영업·도로 이동시간은 확인하지 않았습니다.')
         base['preference_limitation'] = '동행·목적을 후보 비교에 보존하고 기념일 식사의 종류별 우선순위를 반영합니다. 검증된 분위기·가격 자료가 없어 실제 취향 일치를 입증하지는 못합니다.'
-        required_unknown = [dict(stage_id=s['id'], condition_id=c['id'], label=intent.condition_label(c))
-                            for s in plan['stages'] for c in s['conditions'] if c['required']]
+        choice_plan = any(s.get('alternatives') for s in plan['stages'])
+        offer = dict(plan_id=plan['plan_id'], alternatives=withheld) if choice_plan and withheld else None
+        base.update(choice_contract_version=1, withheld_alternatives=withheld, consent_offer=offer)
+        required_unknown = []
+        def pending_response():
+            if not withheld or any(not p for p in potential_pools):
+                return None
+            if mode == 'course':
+                possible, _ = intent.course_rule_selection(potential_pools, plan, data['count'],
+                    (data['user_lat'], data['user_lng']), data['transport'], data['seed'],
+                    data['randomize'], data['recent_place_ids'])
+                if not possible:
+                    return None
+            pending_conditions = [dict(stage_id=a['stage_id'], alternative_id=a['alternative_id'],
+                condition_id=c['id'], label=c['label'] if choice_plan else intent.condition_label(c))
+                for a in withheld for c in a['conditions']]
+            return jsonify(error='필수 조건을 입증할 자료가 없어요. 미확인 대안을 볼지 선택해주세요.',
+                reason='unverified_conditions', metadata={**base, 'intent_status': 'needs_confirmation',
+                'candidate_counts': [min(len(p), intent.MAX_CANDIDATES // len(plan['stages']) +
+                    (i < intent.MAX_CANDIDATES % len(plan['stages']))) for i, p in enumerate(potential_pools)],
+                'unverified_conditions': pending_conditions}, alternatives=[dict(stage_id=a['stage_id'],
+                    alternative_id=a['alternative_id'], names=[]) for a in withheld]), 422
         if any(not p for p in pools):
+            pending = pending_response()
+            if pending is not None:
+                return pending
             return jsonify(error='조건을 유지하는 단계별 후보가 부족해요.', reason='insufficient_candidates',
                            metadata={**base, 'reason': 'missing_slot_candidates', 'intent_status': 'unsatisfied'},
                            **({'places': []} if mode == 'spot' else {'courses': [], 'course_metrics': []})), 422
-        if required_unknown and not data.get('accept_unverified', False):
-            return jsonify(error='필수 조건을 입증할 자료가 없어요. 미확인 대안을 볼지 선택해주세요.',
-                           reason='unverified_conditions', metadata={**base, 'intent_status': 'needs_confirmation',
-                           'unverified_conditions': required_unknown},
-                           alternatives=[{'stage_id': s['id'], 'names': [r['public']['name'] for r in p[:3]]}
-                                         for s, p in zip(plan['stages'], pools)]), 422
         fallback, _course_search = (intent.course_rule_selection(
             full_course_pools, plan, data['count'], (data['user_lat'], data['user_lng']),
             data['transport'], data['seed'], data['randomize'], data['recent_place_ids']) if mode == 'course' else
             (intent.rule_selection(pools, plan, data['count']), None))
+        if not fallback:
+            pending = pending_response()
+            if pending is not None:
+                return pending
         if _course_search:
             base['recommendation_variation'] = _course_search['recommendation_variation']
             base['route_coherence'] = _course_search['route_coherence']
@@ -727,6 +772,10 @@ def _recommend_intent(data, mode):
                     raise ValueError('final_constraint')
                 if child_venue(row) and not children_allowed(data, plan):
                     raise ValueError('final_child_constraint')
+                chosen = alternative_policy.witness(row, plan['stages'][i], grants)
+                if not chosen or chosen != record['public']['alternative_witness']:
+                    raise ValueError('final_alternative_constraint')
+                required_unknown.extend(alternative_policy.unknown_metadata(plan['stages'][i], chosen))
                 place = _fmt(row)
                 place['travel_explanation'] = dict(stage_id=choice['stage_id'], activity=plan['stages'][i]['activity'],
                     reason='등록된 장소 분류 기준으로 요청한 종류에 해당합니다.' + (' 출발점에서의 직선거리를 함께 비교했어요.'
@@ -734,8 +783,14 @@ def _recommend_intent(data, mode):
                     evidence=record['public']['evidence'],
                     evidence_refs=choice['evidence_refs'], reason_codes=choice['reason_codes'],
                     satisfied_conditions=['장소 종류'],
-                    unverified_conditions=[intent.condition_label(c) for c in
-                                           plan['stages'][i]['conditions'] + plan['stages'][i]['preferences']],
+                    unverified_conditions=[intent.condition_label(c) for c in chosen['conditions'] + chosen['preferences']],
+                    alternative_id=chosen['alternative_id'], alternative_label=chosen['alternative_label'],
+                    alternative_quote=chosen['alternative_quote'],
+                    matched_alternative_ids=chosen['matched_alternative_ids'],
+                    eligible_alternative_ids=chosen['eligible_alternative_ids'],
+                    conditions=[dict(c, label=intent.condition_label(c) + ' 여부 미확인', status='unknown',
+                                     accepted_as_unknown=c['required'] and c['id'] in grants) for c in chosen['conditions']],
+                    consent_used=chosen['consent_used'],
                     selection_method=method)
                 visits.append(place)
             built.append(visits)
@@ -747,6 +802,8 @@ def _recommend_intent(data, mode):
             built = [by_id[pid] for pid in varied['place_id']]
             diversity = {**brand_policy, 'returned_known_brand_counts': diversity['returned_known_brand_counts'],
                          'repeated_brand_backfill_count': diversity['repeated_brand_backfill_count']}
+        required_unknown = list({(c['stage_id'], c['alternative_id'], c['condition_id']): c
+                                 for c in required_unknown}.values())
         base.update(returned_count=len(built), selection_method=method, diversity=diversity,
                     intent_status=('unverified_alternative' if required_unknown else
                                    'rules_fallback' if method == 'rules_fallback' else 'grounded_selection'),

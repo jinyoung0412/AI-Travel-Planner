@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'bookmark_button.dart';
+import 'choice_condition_notice.dart';
 import 'course_timeline.dart';
 import 'course_summary_card.dart';
 import 'local_storage_service.dart';
@@ -19,6 +20,8 @@ class CourseResultScreen extends StatefulWidget {
   final Map<String, dynamic> metadata;
   final List<dynamic> courseMetrics;
   final bool sameAsPrevious;
+  final ChoiceConsentOffer? consentOffer;
+  final Future<void> Function(BuildContext)? onIncludeUnverified;
   final KakaoMapConfiguration mapConfiguration;
   final CourseMapSessionFactory? mapSessionFactory;
   final String transport;
@@ -32,6 +35,8 @@ class CourseResultScreen extends StatefulWidget {
     this.metadata = const {},
     this.courseMetrics = const [],
     this.sameAsPrevious = false,
+    this.consentOffer,
+    this.onIncludeUnverified,
     this.mapConfiguration = const KakaoMapConfiguration(),
     this.mapSessionFactory,
     this.transport = '대중교통',
@@ -174,6 +179,10 @@ class _CourseResultScreenState extends State<CourseResultScreen> {
                   child: Column(
                     children: [
                       if (widget.sameAsPrevious) const RepeatedResultNotice(),
+                      ChoiceOfferNotice(
+                        offer: widget.consentOffer,
+                        onInclude: widget.onIncludeUnverified,
+                      ),
                       if (widget.courses.length > 1) ...[
                         Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 20),
