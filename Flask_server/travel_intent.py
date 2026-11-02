@@ -27,7 +27,7 @@ VERSION = 1
 MAX_STAGES = 5
 MAX_CANDIDATES = 30
 TOKEN_TTL = 1800
-DATA_VERSION = 'places-6e51a45748c2-policy-20261102-v11'
+DATA_VERSION = 'places-6e51a45748c2-policy-20261102-v12'
 _SIGNING_KEY = secrets.token_bytes(32)
 _MODEL_SLOTS = threading.BoundedSemaphore(4)
 CONDITION_FIELDS = {'indoor', 'outdoor', 'outdoor_seating', 'open_now', 'accessible'}
@@ -82,7 +82,8 @@ def interpretation_failure_code(error):
         'intent_condition', 'intent_contradiction', 'intent_preference', 'intent_dropped_exclusion',
         'intent_stages', 'intent_count', 'intent_count_conflict', 'intent_result_count',
         'intent_dropped_kind', 'intent_broadened_kind', 'intent_dropped_walk', 'intent_dropped_outdoor',
-        'intent_activity_choice', 'intent_dropped_companion', 'intent_dropped_condition', 'intent_dropped_preference'}
+        'intent_activity_choice', 'intent_dropped_companion', 'intent_dropped_condition', 'intent_dropped_preference',
+        'intent_alternative_condition_scope'}
     return str(error) if isinstance(error, ValueError) and str(error) in allowed else 'invalid_interpretation'
 
 
