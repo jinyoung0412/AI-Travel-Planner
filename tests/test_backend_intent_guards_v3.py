@@ -92,18 +92,13 @@ def test_s04_legacy_keeps_the_conservative_negative_scope():
     ('실내 전시관과 공원 중 하나', ['전시', '공원']),
     ('실내 카페와 야외 공원 중 하나', ['카페', '공원']),
 ])
-def test_s07_explicit_one_of_list_does_not_require_one_branch_modifier_on_every_kind(
+def test_s07_unrepresentable_branch_conditions_are_rejected_before_interpretation(
         monkeypatch, text, kinds):
     raw = plan((text, kinds, []))
-    preview = interpret(monkeypatch, text, raw)
-    assert preview.status_code == 200, preview.json
-    assert preview.json['travel_request']['stages'][0]['conditions'] == []
-    catalogue(monkeypatch, '공원', '합성 공원')
-    result = app.app.test_client().post('/recommend/spot', json={**BASE,
-        'user_text': text, 'intent_token': preview.json['intent_token']})
-    assert result.status_code == 200, result.json
-    assert len(result.json['places']) == 1
-    assert result.json['metadata']['unverified_conditions'] == []
+    preview = interpret(monkeypatch, text, raw, model_calls=0)
+    assert preview.status_code == 422, preview.json
+    assert preview.json['metadata']['failure_code'] == 'intent_alternative_condition_scope'
+    assert 'intent_token' not in preview.json
 
 
 @pytest.mark.parametrize('text,kinds', [
@@ -198,7 +193,7 @@ def test_s07_manual_reordering_keeps_the_whole_or_and_its_common_condition(monke
     assert not stages[0]['conditions'] and not stages[2]['conditions']
 
 
-def test_v11_pre_v3_safe_token_still_requires_unverified_consent(monkeypatch):
+def test_v11_tokens_require_a_new_v12_interpretation_even_for_safe_common_conditions(monkeypatch):
     text = '반드시 실내 카페와 반드시 실내 박물관 중 하나'
     data = app.parse_recommendation({**BASE, 'user_text': text})
     raw = plan((text, ['카페', '박물관'], [condition()]))
@@ -209,9 +204,9 @@ def test_v11_pre_v3_safe_token_still_requires_unverified_consent(monkeypatch):
     catalogue(monkeypatch)
     request = {**BASE, 'user_text': text, 'intent_token': token}
     result = app.app.test_client().post('/recommend/spot', json=request)
-    assert result.status_code == 422 and result.json['reason'] == 'unverified_conditions'
+    assert result.status_code == 400 and result.json['reason'] == 'intent_expired'
     accepted = app.app.test_client().post('/recommend/spot', json={**request, 'accept_unverified': True})
-    assert accepted.status_code == 200
+    assert accepted.status_code == 400 and accepted.json['reason'] == 'intent_expired'
 
 
 @pytest.mark.parametrize('text', [
