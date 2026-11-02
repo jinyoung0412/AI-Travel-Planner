@@ -203,7 +203,6 @@ class _PlaceCard extends StatelessWidget {
                     color: Color(0xFF5F6368),
                   ),
                 ),
-                ChoiceConditionNotice(place: place),
                 const SizedBox(height: 10),
                 PlaceMapButton(place: place, lookupDetail: true),
               ],

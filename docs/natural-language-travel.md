@@ -70,7 +70,7 @@ v13은 원문 전체가 닫힌 문법으로 설명될 때 모델 호출 전에 �
 
 명시적 alternatives가 있는 plan의 동의는 기존 intent_token과 함께 `accept_unverified=true`, `consent_plan_id`(서명 plan의 plan_id), `accepted_condition_ids`(예: s1.a1.c1)를 보낸다. 한 대안의 모든 필수 unknown ID가 승인돼야 그 대안이 허용된다. 다른 대안·다른 plan·보이지 않은 조건으로 동의가 확대되지 않는다. OR에 bool만 보낸 구 APK는422/intent_conflict, failure_code=intent_consent_scope_required로 거부한다. 잘못된 scope는 intent_consent_scope, 다른 plan은400/intent_expired다. 단독 조건의 기존 bool 동의 계약은 유지한다.
 
-후보가 여러 대안에 맞으면 허용된 한 witness로 귀속하고 공원에 카페의 조건을 붙이지 않는다. travel_explanation에 alternative_id/label/quote, 실제 유효 조건의 value/required/unknown과 이번 accepted_as_unknown 사실을 담는다. 충족 근거는 여전히 장소 분류와 좌표뿐이다. 반환 결과의 미확인/동의 metadata와 보류 대안 metadata를 구분한다. 앱의 별도 opt-in/표시 구현은 해당 앱 변경과 함께 제공해야 하며, token/plan 승인용 요청 정보는 저장 place에 넣지 않는다.
+후보가 여러 대안에 맞으면 허용된 한 witness로 귀속하고 공원에 카페의 조건을 붙이지 않는다. travel_explanation에 alternative_id/label/quote, 실제 유효 조건의 value/required/unknown과 이번 accepted_as_unknown 사실을 담는다. 충족 근거는 여전히 장소 분류와 좌표뿐이다. 반환 결과의 미확인/동의 metadata와 보류 대안 metadata를 구분한다. 앱은 미확인 대안을 포함하기 전의 opt-in과 조건별 동의·차단 UI를 유지한다. 2026-11-03 사용자 요청의 후속 UI 정리([#50](https://github.com/jinyoung0412/AI-Travel-Planner/issues/50))로 결과 스팟·코스 타임라인·저장 장소 카드의 선택 대안·이유·확인 필요·동의 이력 설명 블록은 표시하지 않는다. `travel_explanation` 등 추천·저장 데이터와 별도 오류·부족 안내는 유지하며, token/plan 승인용 요청 정보는 저장 place에 넣지 않는다.
 
 고정 wire fixture는 `tests/fixtures/compound_choice_v5_wire.json`이다. 조건 없는 OR, 공원 기본200, safe 후보 없는422, 카페만 scoped 동의한200, 부분동의와 오류·preview 계약을 포함한다. stage5개, 선택지3개/stage, 조건25개/plan, stage quote250자, 모델 후보30개, 원문1000자·token12000자·요청16KB 한도는 초과분을 자르지 않고 거부한다. 원문 완전 설명 경로의 해석 호출은0이며 그 밖의 기존 해석/선정 호출 상한과 예산 guard는 유지한다.
 

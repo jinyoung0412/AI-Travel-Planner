@@ -311,36 +311,3 @@ ChoiceConsentOffer? readChoiceConsentOffer(
     ]),
   );
 }
-
-/// Public historical attribution only; this widget never grants consent.
-class ChoiceConditionNotice extends StatelessWidget {
-  final Map<String, dynamic> place;
-  const ChoiceConditionNotice({super.key, required this.place});
-  @override
-  Widget build(BuildContext context) {
-    final explanation = place['travel_explanation'];
-    if (explanation is! Map ||
-        explanation['alternative_id'] is! String ||
-        explanation['alternative_label'] is! String) {
-      return const SizedBox.shrink();
-    }
-    final unknown = explanation['unverified_conditions'];
-    final labels = unknown is List
-        ? unknown.whereType<String>().where((s) => s.isNotEmpty).toList()
-        : <String>[];
-    final reason = explanation['reason'];
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('선택 대안: ${explanation['alternative_label']}'),
-          if (reason is String && reason.isNotEmpty) Text(reason),
-          if (labels.isNotEmpty) Text('확인 필요: ${labels.join(', ')}'),
-          if (labels.isNotEmpty && explanation['consent_used'] == true)
-            const Text('미확인 조건에 동의하고 포함한 결과예요.'),
-        ],
-      ),
-    );
-  }
-}
