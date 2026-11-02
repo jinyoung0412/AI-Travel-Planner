@@ -31,7 +31,7 @@ def plan(*visits):
         requested_result_count=None)
 
 
-def interpret(monkeypatch, text, raw, **controls):
+def interpret(monkeypatch, text, raw, *, model_calls=1, **controls):
     calls = []
     def model(*args, **kwargs):
         calls.append(kwargs)
@@ -39,7 +39,7 @@ def interpret(monkeypatch, text, raw, **controls):
     monkeypatch.setattr(app, '_call_claude', model)
     response = app.app.test_client().post('/travel/interpret', json={**BASE,
         'user_text': text, 'mode': 'spot', **controls})
-    assert len(calls) == 1  # Source rejection never retries the provider.
+    assert len(calls) == model_calls  # Source-only rejection needs no provider call.
     return response
 
 
@@ -92,8 +92,6 @@ def test_other_clear_positive_modifiers_remain_unverified(monkeypatch, text, fie
     ('실내 카페 말고는 안 가요', ['카페'], []),
     ('실내 카페가 아닌 곳은 싫어요', ['카페'], []),
     ('실내 카페도 좋아요', ['카페'], []),
-    ('실내 카페 또는 공원', ['카페', '공원'], []),
-    ('카페 또는 실내 박물관', ['카페', '박물관'], []),
     ('실내 놀거리', ['볼링'], []), ('실내놀이터', ['실내놀이터'], []),
     ('실내 박물관 근처 카페', ['카페'], []),
 ])

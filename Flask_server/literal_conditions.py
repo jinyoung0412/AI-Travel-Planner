@@ -127,34 +127,64 @@ def _alternative_groups(text, mentions):
     return groups
 
 
-def validate_source_conditions(plan, text, mentions, known, *, clarified=False):
-    """Each clear positive modifier must survive on its own visit as required.
-
-    Each known-kind alternative keeps its own source requirements. Only their
-    intersection is required on a single OR visit. An explicit location request
-    without a kind can bind to the user's single clarified activity. No venue
-    facts or conditions are manufactured; unresolved visit bindings fail closed.
-    """
-    positions = _stage_ranges(plan, text)
-    mentions = sorted(mentions, key=lambda item: item[1])
-    groups = _alternative_groups(text, mentions)
+def _required_by_mention(text, mentions):
+    """Keep the same narrow, positive modifier grammar for both boundaries."""
     required = [set() for _ in mentions]
     for match in _MODIFIERS.finditer(text):
-        word = match['word']
-        # "실내 놀거리" is a kind, not verified indoor operational evidence.
-        if word == '실내' and _KIND.match(text[match.end():]):
+        if match['word'] == '실내' and _KIND.match(text[match.end():]):
             continue
         anchors = [(i, start, end) for i, (_, start, end) in enumerate(mentions)
                    if start >= match.end() and _BRIDGE.fullmatch(text[match.end():start])]
         if anchors:
             i, _, end = min(anchors, key=lambda item: item[1])
-            # A previous alternative's preference marker cannot change this
-            # alternative's explicitly written strength.
             left = mentions[i-1][2] if i else 0
             prefix = _BREAK.split(text[left:match.start()])[-1]
             if _required(prefix, text[end:]):
-                required[i].add(_field(word))
-        elif clarified and len(plan['stages']) == 1 and not mentions:
+                required[i].add(_field(match['word']))
+    return required
+
+
+def validate_alternative_condition_scope(text, mentions):
+    """A shared stage cannot retain different hard requirements per OR branch.
+
+    Reject only an existing known-kind OR group with clear positive modifiers.
+    A qualified/landmark tail on the whole choice is not proof of that scope.
+    Do not invent a shared condition or silently discard a branch requirement.
+    """
+    mentions = sorted(mentions, key=lambda item: item[1])
+    required = _required_by_mention(text, mentions)
+    for group in _alternative_groups(text, mentions):
+        if len(group) < 2:
+            continue
+        tail = text[mentions[group[-1]][2]:]
+        choice = _CHOICE_END.match(tail)
+        if choice:
+            tail = tail[choice.end():]
+        if (_QUALIFIED_TAIL.match(tail) or _POST_SOFT.match(tail) or
+                landmark_suffix(re.sub(r'^(?:관|장|집|점)', '', tail))):
+            continue
+        if any(required[i] != required[group[0]] for i in group[1:]):
+            raise ValueError('intent_alternative_condition_scope')
+
+
+def validate_source_conditions(plan, text, mentions, known, *, clarified=False):
+    """Each clear positive modifier must survive on its own visit as required.
+
+    The source-only boundary first refuses clear asymmetric OR requirements.
+    Supported alternatives share their required fields on one OR visit. An
+    explicit location request without a kind can bind to the user's single
+    clarified activity. No venue
+    facts or conditions are manufactured; unresolved visit bindings fail closed.
+    """
+    positions = _stage_ranges(plan, text)
+    mentions = sorted(mentions, key=lambda item: item[1])
+    groups = _alternative_groups(text, mentions)
+    required = _required_by_mention(text, mentions)
+    if clarified and len(plan['stages']) == 1 and not mentions:
+        for match in _MODIFIERS.finditer(text):
+            word = match['word']
+            if word == '실내' and _KIND.match(text[match.end():]):
+                continue
             tail = text[match.end():]
             context = _CONTEXT.match(tail)
             # "실내에서 친구와 ..." is already an explicit location request;
