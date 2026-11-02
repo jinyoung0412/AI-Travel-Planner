@@ -5,7 +5,7 @@ qualified and unknown constructions remain with the semantic interpretation.
 """
 import re
 
-from category_policy import landmark_suffix, normalize_filters
+from category_policy import landmark_suffix, normalize_filters, directly_excluded
 
 
 _MODIFIERS = re.compile(
@@ -152,8 +152,14 @@ def validate_alternative_condition_scope(text, mentions):
     Do not invent a shared condition or silently discard a branch requirement.
     """
     mentions = sorted(mentions, key=lambda item: item[1])
+    groups = _alternative_groups(text, mentions)
+    if any(len(group) > 1 for group in groups) and any(
+            _LOCATION.match(text[m.end():]) for m in _MODIFIERS.finditer(text)):
+        # The closed compiler has not proved this locative's applicability.
+        # Do not let an unrepresented shared requirement disappear in a model.
+        raise ValueError('intent_choice_scope')
     required = _required_by_mention(text, mentions)
-    for group in _alternative_groups(text, mentions):
+    for group in groups:
         if len(group) < 2:
             continue
         tail = text[mentions[group[-1]][2]:]
@@ -165,6 +171,25 @@ def validate_alternative_condition_scope(text, mentions):
             continue
         if any(required[i] != required[group[0]] for i in group[1:]):
             raise ValueError('intent_alternative_condition_scope')
+
+
+def validate_choice_topology(plan, text, mentions, known):
+    """Unproven prose cannot turn an explicit literal choice into two visits."""
+    mentions = sorted(mentions, key=lambda item: item[1])
+    for group in _alternative_groups(text, mentions):
+        if len(group) < 2 or any(directly_excluded(text[mentions[i][2]:]) or
+                landmark_suffix(text[mentions[i][2]:]) for i in group):
+            continue
+        kinds = [normalize_filters([mentions[i][0]], known) for i in group]
+        if any(len(k) != 1 for k in kinds):
+            continue
+        required = {k[0] for k in kinds}
+        ranges = _stage_ranges(plan, text)
+        matching = [i for i, s in enumerate(plan['stages'])
+                    if required.issubset(s['category_filters']) and all(
+                        ranges[i][0] <= mentions[j][1] < ranges[i][1] for j in group)]
+        if len(matching) != 1:
+            raise ValueError('intent_choice_scope')
 
 
 def validate_source_conditions(plan, text, mentions, known, *, clarified=False):

@@ -60,6 +60,13 @@ def parse_recommendation(value, course=False):
     for field in ('accept_unverified',):
         if type(data.get(field, False)) is not bool:
             raise ValueError('미확인 조건 선택을 확인해주세요.')
+    ids = data.get('accepted_condition_ids', [])
+    if (not isinstance(ids, list) or len(ids) > 25 or any(not isinstance(c, str) or
+            not c or len(c) > 64 for c in ids) or len(set(ids)) != len(ids)):
+        raise ValueError('미확인 조건 선택을 확인해주세요.')
+    data['accepted_condition_ids'] = ids
+    if not isinstance(data.get('consent_plan_id', ''), str) or len(data.get('consent_plan_id', '')) > 64:
+        raise ValueError('미확인 조건 선택을 확인해주세요.')
     if not isinstance(data.get('intent_token', ''), str) or len(data.get('intent_token', '')) > 12000:
         raise ValueError('여행 해석 확인 정보가 올바르지 않습니다.')
     if 'activity_choice' in data and (not isinstance(data['activity_choice'], str) or

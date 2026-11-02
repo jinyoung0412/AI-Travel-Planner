@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'bookmark_button.dart';
+import 'choice_condition_notice.dart';
 import 'place_map_button.dart';
 import 'travel_data.dart';
 import 'local_storage_service.dart';
@@ -12,6 +13,8 @@ class SpotResultScreen extends StatelessWidget {
   final int requestedCount;
   final Map<String, dynamic> metadata;
   final bool sameAsPrevious;
+  final ChoiceConsentOffer? consentOffer;
+  final Future<void> Function(BuildContext)? onIncludeUnverified;
 
   const SpotResultScreen({
     super.key,
@@ -19,6 +22,8 @@ class SpotResultScreen extends StatelessWidget {
     required this.requestedCount,
     this.metadata = const {},
     this.sameAsPrevious = false,
+    this.consentOffer,
+    this.onIncludeUnverified,
   });
 
   @override
@@ -40,9 +45,15 @@ class SpotResultScreen extends StatelessWidget {
         itemCount: places.length + (places.length < requestedCount ? 1 : 0) + 1,
         itemBuilder: (context, index) {
           if (index == 0) {
-            return sameAsPrevious
-                ? const RepeatedResultNotice()
-                : const SizedBox.shrink();
+            return Column(
+              children: [
+                if (sameAsPrevious) const RepeatedResultNotice(),
+                ChoiceOfferNotice(
+                  offer: consentOffer,
+                  onInclude: onIncludeUnverified,
+                ),
+              ],
+            );
           }
           index -= 1;
           if (index == 0 && places.length < requestedCount) {
@@ -192,6 +203,7 @@ class _PlaceCard extends StatelessWidget {
                     color: Color(0xFF5F6368),
                   ),
                 ),
+                ChoiceConditionNotice(place: place),
                 const SizedBox(height: 10),
                 PlaceMapButton(place: place, lookupDetail: true),
               ],

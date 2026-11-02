@@ -1,0 +1,1095 @@
+{
+  "provenance": "Actual offline fixed backend manual-tag output; opaque tokens replaced. No live/provider API used.",
+  "source_evidence_sha256": "4cbc5448807f897e6e3efaadd612449d62afdb38f8ecc7ebea76631a98ff73f3",
+  "trace": [
+    {
+      "case": "manual_plain",
+      "phase": "preview",
+      "status": 200,
+      "body": {
+        "clarification_required": false,
+        "intent_token": "opaque-r4-manual-fixture",
+        "mode_switch_required": false,
+        "target_count": 3,
+        "target_mode": "spot",
+        "travel_request": {
+          "ambiguities": [],
+          "applied_controls": {
+            "count": 3,
+            "persona_tags": [
+              "조용한"
+            ],
+            "plan_mode": "natural",
+            "region": "천안",
+            "transport": "대중교통"
+          },
+          "companion": null,
+          "context_requests": [],
+          "exclusions": [],
+          "manual_overrides": [
+            "분위기 선호는 직접 선택한 태그를 적용합니다. 현장 분위기는 미확인입니다."
+          ],
+          "requested_result_count": null,
+          "requested_visit_count": null,
+          "schema_version": 1,
+          "source_text": "반드시 실내 카페",
+          "stages": [
+            {
+              "activity": "카페",
+              "category_filters": [
+                "카페"
+              ],
+              "conditions": [
+                {
+                  "field": "indoor",
+                  "id": "s1.c1",
+                  "quote": "실내",
+                  "required": true,
+                  "value": true
+                }
+              ],
+              "id": "s1",
+              "preferences": [
+                {
+                  "field": "quiet",
+                  "id": "s1.p1",
+                  "quote": null,
+                  "source": "manual"
+                }
+              ],
+              "quote": "카페"
+            }
+          ],
+          "summary": "카페",
+          "unapplied_manual_tags": [],
+          "unsupported": []
+        }
+      }
+    },
+    {
+      "case": "manual_plain",
+      "phase": "base",
+      "status": 422,
+      "body": {
+        "alternatives": [
+          {
+            "alternative_id": "s1.a1",
+            "names": [],
+            "stage_id": "s1"
+          }
+        ],
+        "error": "필수 조건을 입증할 자료가 없어요. 미확인 대안을 볼지 선택해주세요.",
+        "metadata": {
+          "candidate_counts": [
+            1
+          ],
+          "candidate_quality": {
+            "coordinate_verification": "not_independently_verified",
+            "eligible_count": 5,
+            "excluded_count": 0,
+            "excluded_reason_counts": {},
+            "input_count": 5,
+            "policy_version": "2026-10-20.v2"
+          },
+          "candidate_service_area": {
+            "eligible_count": 5,
+            "excluded_count": 0,
+            "policy": "source_address_service_city_v1"
+          },
+          "category_preference_tags_applied": [],
+          "choice_contract_version": 1,
+          "consent_offer": null,
+          "constraints_relaxed": [],
+          "eligible_candidate_counts": [
+            0
+          ],
+          "family_policy": {
+            "child_venues_allowed": false,
+            "excluded_count": 0,
+            "limitation": "아이 동반은 일반 카페 슬롯을 키즈카페로 변경하지 않습니다.",
+            "policy": "explicit_child_activity_or_companion_v2"
+          },
+          "identity_review": {
+            "eligible_count": 5,
+            "excluded_count": 0,
+            "excluded_reason_counts": {},
+            "input_count": 5,
+            "policy_version": "2026-10-25.v1"
+          },
+          "intent_status": "needs_confirmation",
+          "limitation": "저장된 장소 분류와 좌표의 직선거리가 근거입니다. 현장 상태·영업·도로 이동시간은 확인하지 않았습니다.",
+          "model_budget": {
+            "candidate_limit": 30,
+            "db_reads_max_per_request": 1,
+            "input_bytes_max": 36000,
+            "interpretation_calls_max": 1,
+            "interpretation_output_tokens_max": 2300,
+            "output_bytes_max": 24000,
+            "request_deadline_seconds": 22,
+            "retries": 0,
+            "search_calls": 0,
+            "selection_calls_max": 1,
+            "selection_output_tokens_max": 512,
+            "selection_scope": "rank_validated_recommendations",
+            "selection_transport": "validated_order_v1"
+          },
+          "preference_evidence": "unavailable",
+          "preference_limitation": "동행·목적을 후보 비교에 보존하고 기념일 식사의 종류별 우선순위를 반영합니다. 검증된 분위기·가격 자료가 없어 실제 취향 일치를 입증하지는 못합니다.",
+          "preference_requested": true,
+          "radius_km": 4.5,
+          "recommendation_variation": null,
+          "request_context": {
+            "casual_meal_cost": 1.0,
+            "casual_meal_requested": false,
+            "celebration_dining": false,
+            "companion": null,
+            "deprioritized_candidate_count": 0,
+            "explicit_categories": [
+              "카페"
+            ],
+            "limitation": "기념일 식사에서 간단한 식사 분류의 우선순위를 낮춥니다. 가격·분위기·독립 매장 여부를 입증하는 점수가 아닙니다.",
+            "policy": "source_context_category_cost_v1",
+            "purposes": [],
+            "stage_explicit_categories": {
+              "s1": [
+                "카페"
+              ]
+            },
+            "tags": [
+              "조용한"
+            ],
+            "venue_ambience_verified": false
+          },
+          "request_key": "407ac6c5e30d2cea7cc2e2ce2fb27321d43ed4b725cb5af0685585e9d8dc856d",
+          "requested_count": 3,
+          "selection_fallback_reason": null,
+          "selection_method": null,
+          "selection_validation_reason": null,
+          "travel_request": {
+            "ambiguities": [],
+            "applied_controls": {
+              "count": 3,
+              "persona_tags": [
+                "조용한"
+              ],
+              "plan_mode": "natural",
+              "region": "천안",
+              "transport": "대중교통"
+            },
+            "companion": null,
+            "context_requests": [],
+            "exclusions": [],
+            "manual_overrides": [
+              "분위기 선호는 직접 선택한 태그를 적용합니다. 현장 분위기는 미확인입니다."
+            ],
+            "requested_result_count": null,
+            "requested_visit_count": null,
+            "schema_version": 1,
+            "source_text": "반드시 실내 카페",
+            "stages": [
+              {
+                "activity": "카페",
+                "category_filters": [
+                  "카페"
+                ],
+                "conditions": [
+                  {
+                    "field": "indoor",
+                    "id": "s1.c1",
+                    "quote": "실내",
+                    "required": true,
+                    "value": true
+                  }
+                ],
+                "id": "s1",
+                "preferences": [
+                  {
+                    "field": "quiet",
+                    "id": "s1.p1",
+                    "quote": null,
+                    "source": "manual"
+                  }
+                ],
+                "quote": "카페"
+              }
+            ],
+            "summary": "카페",
+            "unapplied_manual_tags": [],
+            "unsupported": []
+          },
+          "unverified_conditions": [
+            {
+              "alternative_id": "s1.a1",
+              "condition_id": "s1.c1",
+              "label": "실내",
+              "stage_id": "s1"
+            }
+          ],
+          "verified_tag_candidate_count": 0,
+          "withheld_alternatives": [
+            {
+              "alternative_id": "s1.a1",
+              "candidate_count": 1,
+              "conditions": [
+                {
+                  "field": "indoor",
+                  "id": "s1.c1",
+                  "label": "카페: 실내 여부 미확인",
+                  "quote": "실내",
+                  "required": true,
+                  "status": "unknown",
+                  "value": true
+                }
+              ],
+              "label": "카페",
+              "reason": "required_condition_unknown",
+              "stage_id": "s1"
+            }
+          ]
+        },
+        "reason": "unverified_conditions"
+      }
+    },
+    {
+      "case": "manual_plain",
+      "phase": "accepted",
+      "status": 200,
+      "body": {
+        "metadata": {
+          "candidate_counts": [
+            1
+          ],
+          "candidate_quality": {
+            "coordinate_verification": "not_independently_verified",
+            "eligible_count": 5,
+            "excluded_count": 0,
+            "excluded_reason_counts": {},
+            "input_count": 5,
+            "policy_version": "2026-10-20.v2"
+          },
+          "candidate_service_area": {
+            "eligible_count": 5,
+            "excluded_count": 0,
+            "policy": "source_address_service_city_v1"
+          },
+          "category_preference_tags_applied": [],
+          "choice_contract_version": 1,
+          "consent_offer": null,
+          "constraints_relaxed": [],
+          "display_order": "rule_quality_order",
+          "diversity": {
+            "distinct_candidate_count": 1,
+            "known_brand_candidate_count": 0,
+            "known_brand_family_count": 0,
+            "limitation": "확인된 브랜드 소스명에만 다양성 정책을 적용합니다. 지점의 장소 식별자는 유지합니다.",
+            "policy": "known_brand_family_first_v1",
+            "repeated_brand_backfill_count": 0,
+            "requested_brand_exemptions": [],
+            "returned_known_brand_counts": {}
+          },
+          "eligible_candidate_counts": [
+            1
+          ],
+          "family_policy": {
+            "child_venues_allowed": false,
+            "excluded_count": 0,
+            "limitation": "아이 동반은 일반 카페 슬롯을 키즈카페로 변경하지 않습니다.",
+            "policy": "explicit_child_activity_or_companion_v2"
+          },
+          "identity_review": {
+            "eligible_count": 5,
+            "excluded_count": 0,
+            "excluded_reason_counts": {},
+            "input_count": 5,
+            "policy_version": "2026-10-25.v1"
+          },
+          "intent_status": "unverified_alternative",
+          "limitation": "저장된 장소 분류와 좌표의 직선거리가 근거입니다. 현장 상태·영업·도로 이동시간은 확인하지 않았습니다.",
+          "model_budget": {
+            "candidate_limit": 30,
+            "db_reads_max_per_request": 1,
+            "input_bytes_max": 36000,
+            "interpretation_calls_max": 1,
+            "interpretation_output_tokens_max": 2300,
+            "output_bytes_max": 24000,
+            "request_deadline_seconds": 22,
+            "retries": 0,
+            "search_calls": 0,
+            "selection_calls_max": 1,
+            "selection_output_tokens_max": 512,
+            "selection_scope": "rank_validated_recommendations",
+            "selection_transport": "validated_order_v1"
+          },
+          "preference_evidence": "unavailable",
+          "preference_limitation": "동행·목적을 후보 비교에 보존하고 기념일 식사의 종류별 우선순위를 반영합니다. 검증된 분위기·가격 자료가 없어 실제 취향 일치를 입증하지는 못합니다.",
+          "preference_requested": true,
+          "radius_km": 4.5,
+          "reason": "insufficient_candidates",
+          "recommendation_variation": null,
+          "request_context": {
+            "casual_meal_cost": 1.0,
+            "casual_meal_requested": false,
+            "celebration_dining": false,
+            "companion": null,
+            "deprioritized_candidate_count": 0,
+            "explicit_categories": [
+              "카페"
+            ],
+            "limitation": "기념일 식사에서 간단한 식사 분류의 우선순위를 낮춥니다. 가격·분위기·독립 매장 여부를 입증하는 점수가 아닙니다.",
+            "policy": "source_context_category_cost_v1",
+            "purposes": [],
+            "stage_explicit_categories": {
+              "s1": [
+                "카페"
+              ]
+            },
+            "tags": [
+              "조용한"
+            ],
+            "venue_ambience_verified": false
+          },
+          "request_key": "ca14e1fd66ac82f7c3f42ef4eebe78df5c8b3c9466949b68b62792f8439577e3",
+          "requested_count": 3,
+          "returned_count": 1,
+          "seed": 101,
+          "selection_elapsed_ms": 0,
+          "selection_fallback_reason": "provider_timeout",
+          "selection_method": "rules_fallback",
+          "selection_validation_reason": null,
+          "spot_quality": {
+            "limitation": "등록된 인기도·출발점 직선거리와 별도 request_context의 종류별 우선순위를 비교합니다. 취향 정확도나 실제 이동시간 점수가 아닙니다.",
+            "policy": "origin_distance_popularity_quality_window_v1",
+            "quality_window": 0.15,
+            "random_window": 0.04,
+            "randomized": true
+          },
+          "travel_request": {
+            "ambiguities": [],
+            "applied_controls": {
+              "count": 3,
+              "persona_tags": [
+                "조용한"
+              ],
+              "plan_mode": "natural",
+              "region": "천안",
+              "transport": "대중교통"
+            },
+            "companion": null,
+            "context_requests": [],
+            "exclusions": [],
+            "manual_overrides": [
+              "분위기 선호는 직접 선택한 태그를 적용합니다. 현장 분위기는 미확인입니다."
+            ],
+            "requested_result_count": null,
+            "requested_visit_count": null,
+            "schema_version": 1,
+            "source_text": "반드시 실내 카페",
+            "stages": [
+              {
+                "activity": "카페",
+                "category_filters": [
+                  "카페"
+                ],
+                "conditions": [
+                  {
+                    "field": "indoor",
+                    "id": "s1.c1",
+                    "quote": "실내",
+                    "required": true,
+                    "value": true
+                  }
+                ],
+                "id": "s1",
+                "preferences": [
+                  {
+                    "field": "quiet",
+                    "id": "s1.p1",
+                    "quote": null,
+                    "source": "manual"
+                  }
+                ],
+                "quote": "카페"
+              }
+            ],
+            "summary": "카페",
+            "unapplied_manual_tags": [],
+            "unsupported": []
+          },
+          "unverified_conditions": [
+            {
+              "alternative_id": "s1.a1",
+              "condition_id": "s1.c1",
+              "label": "카페: 실내 여부 미확인",
+              "stage_id": "s1"
+            }
+          ],
+          "user_accepted_unverified": true,
+          "verified_tag_candidate_count": 0,
+          "withheld_alternatives": []
+        },
+        "places": [
+          {
+            "address": "충남 천안시 연동검증로 1",
+            "blog_tag_status": "legacy_unverified",
+            "category": "카페",
+            "coordinate_quality": {
+              "address_specificity": "street_number",
+              "coordinate_source": "legacy_unknown",
+              "distance_eligible": true,
+              "limitation": "주소 형식과 저장된 좌표의 신원 연결을 검사했습니다. 장소와 좌표의 실제 일치는 확인되지 않았습니다.",
+              "map_coordinate_eligible": true,
+              "place_coordinate_verified": false,
+              "policy_version": "2026-10-20.v2",
+              "reason_codes": [],
+              "recommendation_eligible": true,
+              "status": "unverified"
+            },
+            "identity_alias_conflicts": {},
+            "identity_aliases": [
+              "local:v1:a5dc3ea962b8e42ad49e55d655599453f0e596dadbdf3f0b039a8fbb86b4dd89"
+            ],
+            "identity_key": "local:v1:a5dc3ea962b8e42ad49e55d655599453f0e596dadbdf3f0b039a8fbb86b4dd89",
+            "lat": 36.8066,
+            "lng": 127.1469,
+            "name": "연동합성 카페0",
+            "place_id": "local:v1:a5dc3ea962b8e42ad49e55d655599453f0e596dadbdf3f0b039a8fbb86b4dd89",
+            "score": 1.0,
+            "source_address": "충남 천안시 연동검증로 1",
+            "source_name": "연동합성 카페0",
+            "travel_explanation": {
+              "activity": "카페",
+              "alternative_id": "s1.a1",
+              "alternative_label": "카페",
+              "alternative_quote": "카페",
+              "conditions": [
+                {
+                  "accepted_as_unknown": true,
+                  "field": "indoor",
+                  "id": "s1.c1",
+                  "label": "실내 여부 미확인",
+                  "quote": "실내",
+                  "required": true,
+                  "status": "unknown",
+                  "value": true
+                }
+              ],
+              "consent_used": true,
+              "eligible_alternative_ids": [
+                "s1.a1"
+              ],
+              "evidence": [
+                {
+                  "category_source": "legacy_unknown",
+                  "checked_at": null,
+                  "field": "category",
+                  "id": "local:v1:a5dc3ea962b8e42ad49e55d655599453f0e596dadbdf3f0b039a8fbb86b4dd89:category",
+                  "snapshot": "places-6e51a45748c2-policy-20261102-v13",
+                  "source": "places_db",
+                  "value": "카페"
+                },
+                {
+                  "checked_at": null,
+                  "field": "origin_distance_km",
+                  "id": "local:v1:a5dc3ea962b8e42ad49e55d655599453f0e596dadbdf3f0b039a8fbb86b4dd89:distance",
+                  "snapshot": "places-6e51a45748c2-policy-20261102-v13",
+                  "source": "coordinate_calculation",
+                  "value": 0.0
+                }
+              ],
+              "evidence_refs": [
+                "local:v1:a5dc3ea962b8e42ad49e55d655599453f0e596dadbdf3f0b039a8fbb86b4dd89:category",
+                "local:v1:a5dc3ea962b8e42ad49e55d655599453f0e596dadbdf3f0b039a8fbb86b4dd89:distance"
+              ],
+              "matched_alternative_ids": [
+                "s1.a1"
+              ],
+              "reason": "등록된 장소 분류 기준으로 요청한 종류에 해당합니다. 출발점에서의 직선거리를 함께 비교했어요.",
+              "reason_codes": [
+                "category_match",
+                "distance"
+              ],
+              "satisfied_conditions": [
+                "장소 종류"
+              ],
+              "selection_method": "rules_fallback",
+              "stage_id": "s1",
+              "unverified_conditions": [
+                "실내",
+                "조용함"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "case": "manual_choice",
+      "phase": "preview",
+      "status": 200,
+      "body": {
+        "clarification_required": false,
+        "intent_token": "opaque-r4-manual-fixture",
+        "mode_switch_required": false,
+        "target_count": 3,
+        "target_mode": "spot",
+        "travel_request": {
+          "ambiguities": [],
+          "applied_controls": {
+            "count": 3,
+            "persona_tags": [
+              "야외 위주"
+            ],
+            "plan_mode": "natural",
+            "region": "천안",
+            "transport": "대중교통"
+          },
+          "companion": null,
+          "exclusions": [],
+          "interpretation_method": "source_choice_contract",
+          "manual_overrides": [
+            "야외 위주는 선호로 기록했습니다. 실제 실내·야외 여부는 미확인이며 추천 순위에 반영하지 못합니다."
+          ],
+          "plan_id": "b95cc6515a2dff89ab4b62224fb2a7e8",
+          "requested_result_count": null,
+          "requested_visit_count": null,
+          "schema_version": 1,
+          "source_text": "카페나 공원 중 하나",
+          "stages": [
+            {
+              "activity": "카페 / 공원 중 한 곳",
+              "alternatives": [
+                {
+                  "category_filters": [
+                    "카페"
+                  ],
+                  "conditions": [],
+                  "id": "s1.a1",
+                  "preferences": [],
+                  "quote": "카페",
+                  "source_span": [
+                    0,
+                    2
+                  ]
+                },
+                {
+                  "category_filters": [
+                    "공원"
+                  ],
+                  "conditions": [],
+                  "id": "s1.a2",
+                  "preferences": [],
+                  "quote": "공원",
+                  "source_span": [
+                    4,
+                    6
+                  ]
+                }
+              ],
+              "category_filters": [
+                "카페",
+                "공원"
+              ],
+              "choice_cardinality": 1,
+              "conditions": [
+                {
+                  "field": "outdoor",
+                  "id": "s1.c1",
+                  "quote": null,
+                  "required": false,
+                  "source": "manual",
+                  "value": true
+                }
+              ],
+              "id": "s1",
+              "preferences": [],
+              "quote": "카페나 공원 중 하나",
+              "source_span": [
+                0,
+                11
+              ]
+            }
+          ],
+          "summary": "카페 / 공원 중 한 곳",
+          "unapplied_manual_tags": [],
+          "unsupported": []
+        }
+      }
+    },
+    {
+      "case": "manual_choice",
+      "phase": "base",
+      "status": 200,
+      "body": {
+        "metadata": {
+          "candidate_counts": [
+            3
+          ],
+          "candidate_quality": {
+            "coordinate_verification": "not_independently_verified",
+            "eligible_count": 5,
+            "excluded_count": 0,
+            "excluded_reason_counts": {},
+            "input_count": 5,
+            "policy_version": "2026-10-20.v2"
+          },
+          "candidate_service_area": {
+            "eligible_count": 5,
+            "excluded_count": 0,
+            "policy": "source_address_service_city_v1"
+          },
+          "category_preference_tags_applied": [],
+          "choice_contract_version": 1,
+          "consent_offer": null,
+          "constraints_relaxed": [],
+          "display_order": "rule_quality_order",
+          "diversity": {
+            "distinct_candidate_count": 3,
+            "known_brand_candidate_count": 0,
+            "known_brand_family_count": 0,
+            "limitation": "확인된 브랜드 소스명에만 다양성 정책을 적용합니다. 지점의 장소 식별자는 유지합니다.",
+            "policy": "known_brand_family_first_v1",
+            "repeated_brand_backfill_count": 0,
+            "requested_brand_exemptions": [],
+            "returned_known_brand_counts": {}
+          },
+          "eligible_candidate_counts": [
+            3
+          ],
+          "family_policy": {
+            "child_venues_allowed": false,
+            "excluded_count": 0,
+            "limitation": "아이 동반은 일반 카페 슬롯을 키즈카페로 변경하지 않습니다.",
+            "policy": "explicit_child_activity_or_companion_v2"
+          },
+          "identity_review": {
+            "eligible_count": 5,
+            "excluded_count": 0,
+            "excluded_reason_counts": {},
+            "input_count": 5,
+            "policy_version": "2026-10-25.v1"
+          },
+          "intent_status": "rules_fallback",
+          "limitation": "저장된 장소 분류와 좌표의 직선거리가 근거입니다. 현장 상태·영업·도로 이동시간은 확인하지 않았습니다.",
+          "model_budget": {
+            "candidate_limit": 30,
+            "db_reads_max_per_request": 1,
+            "input_bytes_max": 36000,
+            "interpretation_calls_max": 1,
+            "interpretation_output_tokens_max": 2300,
+            "output_bytes_max": 24000,
+            "request_deadline_seconds": 22,
+            "retries": 0,
+            "search_calls": 0,
+            "selection_calls_max": 1,
+            "selection_output_tokens_max": 512,
+            "selection_scope": "rank_validated_recommendations",
+            "selection_transport": "validated_order_v1"
+          },
+          "preference_evidence": "unavailable",
+          "preference_limitation": "동행·목적을 후보 비교에 보존하고 기념일 식사의 종류별 우선순위를 반영합니다. 검증된 분위기·가격 자료가 없어 실제 취향 일치를 입증하지는 못합니다.",
+          "preference_requested": true,
+          "radius_km": 4.5,
+          "reason": null,
+          "recommendation_variation": null,
+          "request_context": {
+            "casual_meal_cost": 1.0,
+            "casual_meal_requested": false,
+            "celebration_dining": false,
+            "companion": null,
+            "deprioritized_candidate_count": 0,
+            "explicit_categories": [
+              "공원",
+              "카페"
+            ],
+            "limitation": "기념일 식사에서 간단한 식사 분류의 우선순위를 낮춥니다. 가격·분위기·독립 매장 여부를 입증하는 점수가 아닙니다.",
+            "policy": "source_context_category_cost_v1",
+            "purposes": [],
+            "stage_explicit_categories": {
+              "s1": [
+                "공원",
+                "카페"
+              ]
+            },
+            "tags": [],
+            "venue_ambience_verified": false
+          },
+          "request_key": "81166a98d2858807dc2fff7894f8077c3ce09d4f1b8f20d8691e12a8d671e387",
+          "requested_count": 3,
+          "returned_count": 3,
+          "seed": 101,
+          "selection_elapsed_ms": 0,
+          "selection_fallback_reason": "provider_timeout",
+          "selection_method": "rules_fallback",
+          "selection_validation_reason": null,
+          "spot_quality": {
+            "limitation": "등록된 인기도·출발점 직선거리와 별도 request_context의 종류별 우선순위를 비교합니다. 취향 정확도나 실제 이동시간 점수가 아닙니다.",
+            "policy": "origin_distance_popularity_quality_window_v1",
+            "quality_window": 0.15,
+            "random_window": 0.04,
+            "randomized": true
+          },
+          "travel_request": {
+            "ambiguities": [],
+            "applied_controls": {
+              "count": 3,
+              "persona_tags": [
+                "야외 위주"
+              ],
+              "plan_mode": "natural",
+              "region": "천안",
+              "transport": "대중교통"
+            },
+            "companion": null,
+            "exclusions": [],
+            "interpretation_method": "source_choice_contract",
+            "manual_overrides": [
+              "야외 위주는 선호로 기록했습니다. 실제 실내·야외 여부는 미확인이며 추천 순위에 반영하지 못합니다."
+            ],
+            "plan_id": "b95cc6515a2dff89ab4b62224fb2a7e8",
+            "requested_result_count": null,
+            "requested_visit_count": null,
+            "schema_version": 1,
+            "source_text": "카페나 공원 중 하나",
+            "stages": [
+              {
+                "activity": "카페 / 공원 중 한 곳",
+                "alternatives": [
+                  {
+                    "category_filters": [
+                      "카페"
+                    ],
+                    "conditions": [],
+                    "id": "s1.a1",
+                    "preferences": [],
+                    "quote": "카페",
+                    "source_span": [
+                      0,
+                      2
+                    ]
+                  },
+                  {
+                    "category_filters": [
+                      "공원"
+                    ],
+                    "conditions": [],
+                    "id": "s1.a2",
+                    "preferences": [],
+                    "quote": "공원",
+                    "source_span": [
+                      4,
+                      6
+                    ]
+                  }
+                ],
+                "category_filters": [
+                  "카페",
+                  "공원"
+                ],
+                "choice_cardinality": 1,
+                "conditions": [
+                  {
+                    "field": "outdoor",
+                    "id": "s1.c1",
+                    "quote": null,
+                    "required": false,
+                    "source": "manual",
+                    "value": true
+                  }
+                ],
+                "id": "s1",
+                "preferences": [],
+                "quote": "카페나 공원 중 하나",
+                "source_span": [
+                  0,
+                  11
+                ]
+              }
+            ],
+            "summary": "카페 / 공원 중 한 곳",
+            "unapplied_manual_tags": [],
+            "unsupported": []
+          },
+          "unverified_conditions": [],
+          "user_accepted_unverified": false,
+          "verified_tag_candidate_count": 0,
+          "withheld_alternatives": []
+        },
+        "places": [
+          {
+            "address": "충남 천안시 연동검증로 1",
+            "blog_tag_status": "legacy_unverified",
+            "category": "카페",
+            "coordinate_quality": {
+              "address_specificity": "street_number",
+              "coordinate_source": "legacy_unknown",
+              "distance_eligible": true,
+              "limitation": "주소 형식과 저장된 좌표의 신원 연결을 검사했습니다. 장소와 좌표의 실제 일치는 확인되지 않았습니다.",
+              "map_coordinate_eligible": true,
+              "place_coordinate_verified": false,
+              "policy_version": "2026-10-20.v2",
+              "reason_codes": [],
+              "recommendation_eligible": true,
+              "status": "unverified"
+            },
+            "identity_alias_conflicts": {},
+            "identity_aliases": [
+              "local:v1:a5dc3ea962b8e42ad49e55d655599453f0e596dadbdf3f0b039a8fbb86b4dd89"
+            ],
+            "identity_key": "local:v1:a5dc3ea962b8e42ad49e55d655599453f0e596dadbdf3f0b039a8fbb86b4dd89",
+            "lat": 36.8066,
+            "lng": 127.1469,
+            "name": "연동합성 카페0",
+            "place_id": "local:v1:a5dc3ea962b8e42ad49e55d655599453f0e596dadbdf3f0b039a8fbb86b4dd89",
+            "score": 1.0,
+            "source_address": "충남 천안시 연동검증로 1",
+            "source_name": "연동합성 카페0",
+            "travel_explanation": {
+              "activity": "카페 / 공원 중 한 곳",
+              "alternative_id": "s1.a1",
+              "alternative_label": "카페",
+              "alternative_quote": "카페",
+              "conditions": [
+                {
+                  "accepted_as_unknown": false,
+                  "field": "outdoor",
+                  "id": "s1.c1",
+                  "label": "야외 여부 미확인",
+                  "quote": null,
+                  "required": false,
+                  "source": "manual",
+                  "status": "unknown",
+                  "value": true
+                }
+              ],
+              "consent_used": false,
+              "eligible_alternative_ids": [
+                "s1.a1"
+              ],
+              "evidence": [
+                {
+                  "category_source": "legacy_unknown",
+                  "checked_at": null,
+                  "field": "category",
+                  "id": "local:v1:a5dc3ea962b8e42ad49e55d655599453f0e596dadbdf3f0b039a8fbb86b4dd89:category",
+                  "snapshot": "places-6e51a45748c2-policy-20261102-v13",
+                  "source": "places_db",
+                  "value": "카페"
+                },
+                {
+                  "checked_at": null,
+                  "field": "origin_distance_km",
+                  "id": "local:v1:a5dc3ea962b8e42ad49e55d655599453f0e596dadbdf3f0b039a8fbb86b4dd89:distance",
+                  "snapshot": "places-6e51a45748c2-policy-20261102-v13",
+                  "source": "coordinate_calculation",
+                  "value": 0.0
+                }
+              ],
+              "evidence_refs": [
+                "local:v1:a5dc3ea962b8e42ad49e55d655599453f0e596dadbdf3f0b039a8fbb86b4dd89:category",
+                "local:v1:a5dc3ea962b8e42ad49e55d655599453f0e596dadbdf3f0b039a8fbb86b4dd89:distance"
+              ],
+              "matched_alternative_ids": [
+                "s1.a1"
+              ],
+              "reason": "등록된 장소 분류 기준으로 요청한 종류에 해당합니다. 출발점에서의 직선거리를 함께 비교했어요.",
+              "reason_codes": [
+                "category_match",
+                "distance"
+              ],
+              "satisfied_conditions": [
+                "장소 종류"
+              ],
+              "selection_method": "rules_fallback",
+              "stage_id": "s1",
+              "unverified_conditions": [
+                "야외"
+              ]
+            }
+          },
+          {
+            "address": "충남 천안시 연동검증로 2",
+            "blog_tag_status": "legacy_unverified",
+            "category": "공원",
+            "coordinate_quality": {
+              "address_specificity": "street_number",
+              "coordinate_source": "legacy_unknown",
+              "distance_eligible": true,
+              "limitation": "주소 형식과 저장된 좌표의 신원 연결을 검사했습니다. 장소와 좌표의 실제 일치는 확인되지 않았습니다.",
+              "map_coordinate_eligible": true,
+              "place_coordinate_verified": false,
+              "policy_version": "2026-10-20.v2",
+              "reason_codes": [],
+              "recommendation_eligible": true,
+              "status": "unverified"
+            },
+            "identity_alias_conflicts": {},
+            "identity_aliases": [
+              "local:v1:5eb01dce27dce1e075e1ae7d6fcbc2889f7ed05ac7a64e3166b86150f2fd5ece"
+            ],
+            "identity_key": "local:v1:5eb01dce27dce1e075e1ae7d6fcbc2889f7ed05ac7a64e3166b86150f2fd5ece",
+            "lat": 36.80662,
+            "lng": 127.1469,
+            "name": "연동합성 공원1",
+            "place_id": "local:v1:5eb01dce27dce1e075e1ae7d6fcbc2889f7ed05ac7a64e3166b86150f2fd5ece",
+            "score": 0.768,
+            "source_address": "충남 천안시 연동검증로 2",
+            "source_name": "연동합성 공원1",
+            "travel_explanation": {
+              "activity": "카페 / 공원 중 한 곳",
+              "alternative_id": "s1.a2",
+              "alternative_label": "공원",
+              "alternative_quote": "공원",
+              "conditions": [
+                {
+                  "accepted_as_unknown": false,
+                  "field": "outdoor",
+                  "id": "s1.c1",
+                  "label": "야외 여부 미확인",
+                  "quote": null,
+                  "required": false,
+                  "source": "manual",
+                  "status": "unknown",
+                  "value": true
+                }
+              ],
+              "consent_used": false,
+              "eligible_alternative_ids": [
+                "s1.a2"
+              ],
+              "evidence": [
+                {
+                  "category_source": "legacy_unknown",
+                  "checked_at": null,
+                  "field": "category",
+                  "id": "local:v1:5eb01dce27dce1e075e1ae7d6fcbc2889f7ed05ac7a64e3166b86150f2fd5ece:category",
+                  "snapshot": "places-6e51a45748c2-policy-20261102-v13",
+                  "source": "places_db",
+                  "value": "공원"
+                },
+                {
+                  "checked_at": null,
+                  "field": "origin_distance_km",
+                  "id": "local:v1:5eb01dce27dce1e075e1ae7d6fcbc2889f7ed05ac7a64e3166b86150f2fd5ece:distance",
+                  "snapshot": "places-6e51a45748c2-policy-20261102-v13",
+                  "source": "coordinate_calculation",
+                  "value": 0.0
+                }
+              ],
+              "evidence_refs": [
+                "local:v1:5eb01dce27dce1e075e1ae7d6fcbc2889f7ed05ac7a64e3166b86150f2fd5ece:category",
+                "local:v1:5eb01dce27dce1e075e1ae7d6fcbc2889f7ed05ac7a64e3166b86150f2fd5ece:distance"
+              ],
+              "matched_alternative_ids": [
+                "s1.a2"
+              ],
+              "reason": "등록된 장소 분류 기준으로 요청한 종류에 해당합니다. 출발점에서의 직선거리를 함께 비교했어요.",
+              "reason_codes": [
+                "category_match",
+                "distance"
+              ],
+              "satisfied_conditions": [
+                "장소 종류"
+              ],
+              "selection_method": "rules_fallback",
+              "stage_id": "s1",
+              "unverified_conditions": [
+                "야외"
+              ]
+            }
+          },
+          {
+            "address": "충남 천안시 연동검증로 3",
+            "blog_tag_status": "legacy_unverified",
+            "category": "공원",
+            "coordinate_quality": {
+              "address_specificity": "street_number",
+              "coordinate_source": "legacy_unknown",
+              "distance_eligible": true,
+              "limitation": "주소 형식과 저장된 좌표의 신원 연결을 검사했습니다. 장소와 좌표의 실제 일치는 확인되지 않았습니다.",
+              "map_coordinate_eligible": true,
+              "place_coordinate_verified": false,
+              "policy_version": "2026-10-20.v2",
+              "reason_codes": [],
+              "recommendation_eligible": true,
+              "status": "unverified"
+            },
+            "identity_alias_conflicts": {},
+            "identity_aliases": [
+              "local:v1:38a2eec8fdad4d2ab7f7bb5d152a5f35dadfe82d6893503669407fe3f8b70a4a"
+            ],
+            "identity_key": "local:v1:38a2eec8fdad4d2ab7f7bb5d152a5f35dadfe82d6893503669407fe3f8b70a4a",
+            "lat": 36.80664,
+            "lng": 127.1469,
+            "name": "연동합성 공원2",
+            "place_id": "local:v1:38a2eec8fdad4d2ab7f7bb5d152a5f35dadfe82d6893503669407fe3f8b70a4a",
+            "score": 0.525,
+            "source_address": "충남 천안시 연동검증로 3",
+            "source_name": "연동합성 공원2",
+            "travel_explanation": {
+              "activity": "카페 / 공원 중 한 곳",
+              "alternative_id": "s1.a2",
+              "alternative_label": "공원",
+              "alternative_quote": "공원",
+              "conditions": [
+                {
+                  "accepted_as_unknown": false,
+                  "field": "outdoor",
+                  "id": "s1.c1",
+                  "label": "야외 여부 미확인",
+                  "quote": null,
+                  "required": false,
+                  "source": "manual",
+                  "status": "unknown",
+                  "value": true
+                }
+              ],
+              "consent_used": false,
+              "eligible_alternative_ids": [
+                "s1.a2"
+              ],
+              "evidence": [
+                {
+                  "category_source": "legacy_unknown",
+                  "checked_at": null,
+                  "field": "category",
+                  "id": "local:v1:38a2eec8fdad4d2ab7f7bb5d152a5f35dadfe82d6893503669407fe3f8b70a4a:category",
+                  "snapshot": "places-6e51a45748c2-policy-20261102-v13",
+                  "source": "places_db",
+                  "value": "공원"
+                },
+                {
+                  "checked_at": null,
+                  "field": "origin_distance_km",
+                  "id": "local:v1:38a2eec8fdad4d2ab7f7bb5d152a5f35dadfe82d6893503669407fe3f8b70a4a:distance",
+                  "snapshot": "places-6e51a45748c2-policy-20261102-v13",
+                  "source": "coordinate_calculation",
+                  "value": 0.0
+                }
+              ],
+              "evidence_refs": [
+                "local:v1:38a2eec8fdad4d2ab7f7bb5d152a5f35dadfe82d6893503669407fe3f8b70a4a:category",
+                "local:v1:38a2eec8fdad4d2ab7f7bb5d152a5f35dadfe82d6893503669407fe3f8b70a4a:distance"
+              ],
+              "matched_alternative_ids": [
+                "s1.a2"
+              ],
+              "reason": "등록된 장소 분류 기준으로 요청한 종류에 해당합니다. 출발점에서의 직선거리를 함께 비교했어요.",
+              "reason_codes": [
+                "category_match",
+                "distance"
+              ],
+              "satisfied_conditions": [
+                "장소 종류"
+              ],
+              "selection_method": "rules_fallback",
+              "stage_id": "s1",
+              "unverified_conditions": [
+                "야외"
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

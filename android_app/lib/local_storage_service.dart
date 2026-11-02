@@ -207,7 +207,7 @@ class LocalStorageService {
   }
 
   static Future<void> saveSpot(Map<String, dynamic> spot) {
-    final snapshot = Map<String, dynamic>.from(spot);
+    final snapshot = publicTravelObject(spot);
     return _serial(() => _saveSpot(snapshot));
   }
 
@@ -235,7 +235,7 @@ class LocalStorageService {
     for (final entry in _conflicts(updated).entries) {
       conflicts.putIfAbsent(entry.key, () => <String>{}).addAll(entry.value);
     }
-    return {
+    return publicTravelObject({
       ...result,
       'identity_aliases': ({
         ..._aliases(existing),
@@ -245,7 +245,7 @@ class LocalStorageService {
         for (final entry in conflicts.entries)
           entry.key: (entry.value.toList()..sort()),
       },
-    };
+    });
   }
 
   static Future<void> _saveSpot(Map<String, dynamic> spot) async {
@@ -288,13 +288,11 @@ class LocalStorageService {
     Map<String, dynamic>? metric,
     Map<String, dynamic>? metadata,
   }) {
-    final snapshot = spots.map((s) => Map<String, dynamic>.from(s)).toList();
-    final savedMetric = metric == null
-        ? null
-        : Map<String, dynamic>.from(metric);
+    final snapshot = spots.map(publicTravelObject).toList();
+    final savedMetric = metric == null ? null : publicTravelObject(metric);
     final savedMetadata = metadata == null
         ? null
-        : Map<String, dynamic>.from(metadata);
+        : publicTravelObject(metadata);
     return _serial(() async {
       final spots = snapshot;
       final courses = await _read(_coursesKey, courses: true);

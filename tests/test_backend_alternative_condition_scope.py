@@ -1,28 +1,16 @@
 """P05: refuse unsupported branch requirements without erasing or spreading them."""
-import copy
 
 import pytest
 
 import app
 import travel_intent as ti
-from test_backend_intent_guards import BASE, condition, interpret, plan
+from test_backend_intent_guards import BASE, condition, interpret, plan, consent_fields
 from test_backend_intent_guards_v2 import catalogue
 
 
 P05 = '실내 카페와 공원 중 하나 가고 싶어'
-CODE = 'intent_alternative_condition_scope'
 
 
-def assert_scope_error(response):
-    assert response.status_code == 422, response.json
-    assert response.json['reason'] == 'intent_conflict'
-    assert response.json['metadata']['failure_code'] == CODE
-    assert '선택지마다 필수 조건' in response.json['error']
-    assert '활동 하나를 골라' in response.json['error']
-    assert '그 활동의 조건과 함께' in response.json['error']
-    assert 'intent_token' not in response.json
-    assert not response.json.get('places')
-    assert not response.json.get('courses')
 
 
 @pytest.mark.parametrize('text', [
@@ -34,10 +22,11 @@ def assert_scope_error(response):
     '반드시 실내 카페 또는 가능하면 실내 박물관',
     '카페와 공원과 실내 박물관 셋 중 하나',
 ])
-def test_clear_asymmetric_required_choices_fail_before_the_model(monkeypatch, text):
-    # The response would be malformed; source-only rejection must precede it.
+def test_clear_asymmetric_required_choices_compile_before_the_model(monkeypatch, text):
     response = interpret(monkeypatch, text, {}, model_calls=0, count=3)
-    assert_scope_error(response)
+    assert response.status_code == 200, response.json
+    assert response.json['mode_switch_required'] is False
+    assert len(response.json['travel_request']['stages'][0]['alternatives']) >= 2
 
 
 @pytest.mark.parametrize('raw', [
@@ -45,36 +34,32 @@ def test_clear_asymmetric_required_choices_fail_before_the_model(monkeypatch, te
     plan(('공원', ['공원'], [])),
     plan(('실내 카페', ['카페'], [condition()]), ('공원', ['공원'], [])),
 ])
-def test_p05_does_not_need_a_good_model_response_to_give_specific_guidance(monkeypatch, raw):
-    assert_scope_error(interpret(monkeypatch, P05, raw, model_calls=0))
+def test_p05_preserves_source_alternatives_without_a_model_response(monkeypatch, raw):
+    result = interpret(monkeypatch, P05, raw, model_calls=0)
+    assert result.status_code == 200, result.json
+    assert len(result.json['travel_request']['stages']) == 1
+    assert result.json['travel_request']['stages'][0]['alternatives'][0]['conditions'][0]['required']
 
 
 @pytest.mark.parametrize('token_policy', [None, 'v11', 'v12'])
 @pytest.mark.parametrize('accept', [False, True])
-def test_indoor_unverified_cafe_http_path_cannot_bypass_scope_with_tokens_or_consent(
-        monkeypatch, token_policy, accept):
-    # Before v4 this exact cafe-only catalogue + common-only OR plan returned
-    # 200 without consent. Never treat a cafe category as evidence of indoor.
+def test_indoor_unverified_cafe_http_path_cannot_bypass_scope_with_tokens_or_consent(monkeypatch, token_policy, accept):
     catalogue(monkeypatch, '카페', '합성 실내 여부 미확인 카페')
-    def forbidden(*args, **kwargs):
-        pytest.fail('Unsupported branch request must reach neither model nor catalogue')
-    monkeypatch.setattr(app, '_call_claude', forbidden)
-    monkeypatch.setattr(app, 'get_df', forbidden)
+    monkeypatch.setattr(app, '_call_claude', lambda *a, **k: pytest.fail('No model call before consent'))
     request = {**BASE, 'user_text': P05, 'accept_unverified': accept}
     if token_policy:
         data = app.parse_recommendation(request)
         raw = plan((P05, ['카페', '공원'], []))
-        validated = ti.apply_controls(ti.validate_interpretation(
-            copy.deepcopy(raw), P05, app._known_categories()), data, 'spot')
+        validated = ti.apply_controls(ti.validate_interpretation(raw, P05, app._known_categories()), data, 'spot')
         with monkeypatch.context() as policy:
             policy.setattr(ti, 'DATA_VERSION', f'places-6e51a45748c2-policy-20261102-{token_policy}')
             request['intent_token'] = ti.sign_plan(validated, data, 'spot')
     response = app.app.test_client().post('/recommend/spot', json=request)
-    if token_policy == 'v11' or (accept and not token_policy):
-        assert response.status_code == 400
-        assert response.json['reason'] == 'intent_expired'
+    if token_policy or accept:
+        assert response.status_code == 400 and response.json['reason'] == 'intent_expired'
     else:
-        assert_scope_error(response)
+        assert response.status_code == 422 and response.json['reason'] == 'unverified_conditions'
+        assert not response.json.get('places')
 
 
 @pytest.mark.parametrize('text,kinds', [
@@ -104,11 +89,11 @@ def test_unconditioned_or_reaches_a_cafe_without_manufacturing_an_indoor_require
     assert response.json['metadata']['unverified_conditions'] == []
 
 
-def test_unconditioned_choice_does_not_lose_the_kind_omission_guard(monkeypatch):
+def test_unconditioned_choice_recovers_an_omitted_kind_from_source(monkeypatch):
     text = '카페와 공원 중 하나'
     response = interpret(monkeypatch, text, plan(('공원', ['공원'], [])))
-    assert response.status_code == 422
-    assert response.json['metadata']['failure_code'] == 'intent_dropped_kind'
+    assert response.status_code == 200
+    assert set(response.json['travel_request']['stages'][0]['category_filters']) == {'카페', '공원'}
 
 
 @pytest.mark.parametrize('tags', [[], ['친구와', '조용한']])
@@ -132,8 +117,8 @@ def test_explicit_child_companion_does_not_block_an_unconditioned_choice(monkeyp
     ('반드시 실내 카페', ['카페']),
     ('반드시 실내 카페와 반드시 실내 박물관 중 하나', ['카페', '박물관']),
 ])
-def test_supported_individual_and_common_v12_conditions_still_need_consent(monkeypatch, text, kinds):
-    assert ti.DATA_VERSION.endswith('-v12')
+def test_supported_individual_and_common_v13_conditions_still_need_consent(monkeypatch, text, kinds):
+    assert ti.DATA_VERSION.endswith('-v13')
     preview = interpret(monkeypatch, text, plan((text, kinds, [condition()])))
     assert preview.status_code == 200, preview.json
     catalogue(monkeypatch)
@@ -141,7 +126,7 @@ def test_supported_individual_and_common_v12_conditions_still_need_consent(monke
     client = app.app.test_client()
     denied = client.post('/recommend/spot', json=request)
     assert denied.status_code == 422 and denied.json['reason'] == 'unverified_conditions'
-    accepted = client.post('/recommend/spot', json={**request, 'accept_unverified': True})
+    accepted = client.post('/recommend/spot', json={**request, **consent_fields(preview)})
     assert accepted.status_code == 200, accepted.json
     assert accepted.json['metadata']['user_accepted_unverified'] is True
     assert accepted.json['places'][0]['travel_explanation']['satisfied_conditions'] == ['장소 종류']

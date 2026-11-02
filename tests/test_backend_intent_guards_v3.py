@@ -8,7 +8,7 @@ import app
 import travel_intent as ti
 from family_policy import filter_child_candidates
 from place_identity import ensure_ids
-from test_backend_intent_guards import BASE, condition, interpret, plan
+from test_backend_intent_guards import BASE, condition, interpret, plan, consent_fields
 from test_backend_intent_guards_v2 import catalogue
 
 
@@ -92,13 +92,14 @@ def test_s04_legacy_keeps_the_conservative_negative_scope():
     ('실내 전시관과 공원 중 하나', ['전시', '공원']),
     ('실내 카페와 야외 공원 중 하나', ['카페', '공원']),
 ])
-def test_s07_unrepresentable_branch_conditions_are_rejected_before_interpretation(
-        monkeypatch, text, kinds):
-    raw = plan((text, kinds, []))
-    preview = interpret(monkeypatch, text, raw, model_calls=0)
-    assert preview.status_code == 422, preview.json
-    assert preview.json['metadata']['failure_code'] == 'intent_alternative_condition_scope'
-    assert 'intent_token' not in preview.json
+def test_s07_branch_conditions_are_preserved_without_a_common_fact(monkeypatch, text, kinds):
+    # v4 refused this scope; v13 represents each branch without a common fact.
+    result = interpret(monkeypatch, text, plan((text, kinds, [])), model_calls=0)
+    assert result.status_code == 200, result.json
+    stage = result.json['travel_request']['stages'][0]
+    assert not stage['conditions']
+    assert stage['alternatives'][0]['conditions'][0]['field'] == 'indoor'
+    assert all(c['field'] != 'indoor' for c in stage['alternatives'][-1]['conditions'])
 
 
 @pytest.mark.parametrize('text,kinds', [
@@ -108,19 +109,17 @@ def test_s07_unrepresentable_branch_conditions_are_rejected_before_interpretatio
 ])
 @pytest.mark.parametrize('conditions,expected', [([], 422),
     ([condition(required=False)], 422), ([condition(value=False)], 422), ([condition()], 200)])
-def test_s07_common_required_condition_still_needs_explicit_unverified_consent(
-        monkeypatch, text, kinds, conditions, expected):
+def test_s07_common_required_condition_still_needs_explicit_unverified_consent(monkeypatch, text, kinds, conditions, expected):
     preview = interpret(monkeypatch, text, plan((text, kinds, conditions)))
-    assert preview.status_code == expected, preview.json
-    if expected == 422:
-        assert preview.json['metadata']['failure_code'] == 'intent_dropped_condition'
-        return
+    assert preview.status_code == 200, preview.json
+    for alt in preview.json['travel_request']['stages'][0]['alternatives']:
+        assert alt['conditions'][0]['value'] is True and alt['conditions'][0]['required'] is True
     catalogue(monkeypatch)
     request = {**BASE, 'user_text': text, 'intent_token': preview.json['intent_token']}
     denied = app.app.test_client().post('/recommend/spot', json=request)
     assert denied.status_code == 422 and denied.json['reason'] == 'unverified_conditions'
-    accepted = app.app.test_client().post('/recommend/spot', json={**request, 'accept_unverified': True})
-    assert accepted.status_code == 200
+    accepted = app.app.test_client().post('/recommend/spot', json={**request, **consent_fields(preview)})
+    assert accepted.status_code == 200, accepted.json
     assert accepted.json['metadata']['user_accepted_unverified'] is True
     assert accepted.json['places'][0]['travel_explanation']['satisfied_conditions'] == ['장소 종류']
 
@@ -176,9 +175,11 @@ def test_s07_distributive_or_unresolved_list_size_does_not_erase_a_required_cond
 def test_s07_other_visit_choice_cannot_hide_the_first_visit_required_condition(monkeypatch):
     text = '반드시 실내 카페에 갔다가 공원과 박물관 중 하나'
     raw = plan(('카페', ['카페'], []), ('공원과 박물관 중 하나', ['공원', '박물관'], []))
-    assert interpret(monkeypatch, text, raw, mode='course').status_code == 422
-    raw['stages'][0]['conditions'] = [condition()]
-    assert interpret(monkeypatch, text, raw, mode='course').status_code == 200
+    result = interpret(monkeypatch, text, raw, mode='course')
+    assert result.status_code == 200, result.json
+    first, second = result.json['travel_request']['stages']
+    assert first['conditions'][0]['field'] == 'indoor' and first['conditions'][0]['required']
+    assert all(not a['conditions'] for a in second['alternatives'])
 
 
 def test_s07_manual_reordering_keeps_the_whole_or_and_its_common_condition(monkeypatch):
@@ -189,11 +190,11 @@ def test_s07_manual_reordering_keeps_the_whole_or_and_its_common_condition(monke
     assert preview.status_code == 200, preview.json
     stages = preview.json['travel_request']['stages']
     assert set(stages[1]['category_filters']) == {'공원', '수목원'}
-    assert stages[1]['conditions'][0]['field'] == 'indoor'
+    assert all(a['conditions'][0]['field'] == 'indoor' for a in stages[1]['alternatives'])
     assert not stages[0]['conditions'] and not stages[2]['conditions']
 
 
-def test_v11_tokens_require_a_new_v12_interpretation_even_for_safe_common_conditions(monkeypatch):
+def test_v11_tokens_require_a_new_interpretation_even_for_safe_common_conditions(monkeypatch):
     text = '반드시 실내 카페와 반드시 실내 박물관 중 하나'
     data = app.parse_recommendation({**BASE, 'user_text': text})
     raw = plan((text, ['카페', '박물관'], [condition()]))
