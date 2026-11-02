@@ -62,12 +62,19 @@ class FakeIntentSource implements IntentRecommendationSource {
         'target_count': multiple ? 1 : request.count,
         'mode_switch_required': multiple,
         'travel_request': {
+          'schema_version': 1,
           'summary': multiple ? '연인과 · 산책 → 야외 맥주' : '카페',
           'stages': [
             {
+              'id': 's1',
+              'activity': '카페',
+              'quote': '카페',
+              'category_filters': ['카페'],
+              'preferences': [],
               'conditions': negativeIndoor
                   ? [
                       {
+                        'id': 's1.c1',
                         'field': 'indoor',
                         'value': false,
                         'quote': '실내 말고',
@@ -76,7 +83,13 @@ class FakeIntentSource implements IntentRecommendationSource {
                     ]
                   : multiple
                   ? [
-                      {'quote': '야장', 'required': true},
+                      {
+                        'id': 's1.c1',
+                        'field': 'outdoor_seating',
+                        'value': true,
+                        'quote': '야장',
+                        'required': true,
+                      },
                     ]
                   : [],
             },

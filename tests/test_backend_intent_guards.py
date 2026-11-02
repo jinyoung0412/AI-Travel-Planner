@@ -31,7 +31,7 @@ def plan(*visits):
         requested_result_count=None)
 
 
-def interpret(monkeypatch, text, raw, *, model_calls=1, **controls):
+def interpret(monkeypatch, text, raw, *, model_calls=None, **controls):
     calls = []
     def model(*args, **kwargs):
         calls.append(kwargs)
@@ -39,8 +39,21 @@ def interpret(monkeypatch, text, raw, *, model_calls=1, **controls):
     monkeypatch.setattr(app, '_call_claude', model)
     response = app.app.test_client().post('/travel/interpret', json={**BASE,
         'user_text': text, 'mode': 'spot', **controls})
-    assert len(calls) == model_calls  # Source-only rejection needs no provider call.
+    if model_calls is None:
+        compiled = app.compound_choice.source_plan(text, app._category_mentions(text), app._known_categories())
+        model_calls = 0 if compiled and not controls.get('activity_choice') else 1
+    assert len(calls) == model_calls
     return response
+
+
+def consent_fields(preview):
+    value = preview.json['travel_request']
+    if not any(s.get('alternatives') for s in value['stages']):
+        return dict(accept_unverified=True)
+    ids = [c['id'] for s in value['stages'] for c in
+           s['conditions'] + [c for a in s.get('alternatives', []) for c in a['conditions']]
+           if c['required']]
+    return dict(accept_unverified=True, consent_plan_id=value['plan_id'], accepted_condition_ids=ids)
 
 
 @pytest.mark.parametrize('conditions', [[], [condition(required=False)], [condition(value=False)]])

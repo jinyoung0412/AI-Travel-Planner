@@ -26,6 +26,27 @@ async function request(app, { path = '/recommend/spot', body = {}, raw, method =
 const fail = () => { throw new Error('External calls forbidden'); };
 const fake = post => createApp({ httpClient: { post, get: fail }, env: {} });
 
+test('v13 choice wire fixtures preserve scoped requests and exact response envelopes without sockets', async () => {
+    const { EventEmitter } = require('node:events');
+    const fixture = require('../tests/fixtures/compound_choice_v5_wire.json');
+    for (const entry of [...fixture.fixtures, ...fixture.errors]) {
+        const path = entry.id === 'F05-preview-one-visit' ? '/travel/interpret' : '/recommend/spot';
+        const app = fake(async (url, body) => {
+            assert.deepEqual(body, entry.request);
+            if (entry.status !== 200) throw { response: { status: entry.status, data: entry.flask_body } };
+            return { data: entry.flask_body };
+        });
+        const route = (app._router || app.router).stack.find(layer => layer.route?.path === path);
+        const req = Object.assign(new EventEmitter(), { body: entry.request, aborted: false });
+        const res = Object.assign(new EventEmitter(), { destroyed: false, writableEnded: false });
+        res.status = function (status) { this.statusCode = status; return this; };
+        res.json = function (body) { this.body = body; this.writableEnded = true; return this; };
+        await route.route.stack[0].handle(req, res);
+        assert.equal(res.statusCode, entry.status);
+        assert.deepEqual(res.body, entry.node_body);
+    }
+});
+
 test('travel interpretation preserves the versioned preview and exact manual controls', async () => {
     const preview = { travel_request: { schema_version: 1, stages: [{ id: 's1' }] },
         intent_token: 'signed', mode_switch_required: false, target_mode: 'spot', target_count: 1 };

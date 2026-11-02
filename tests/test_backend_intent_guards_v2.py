@@ -8,7 +8,7 @@ import app
 import travel_intent as ti
 from family_policy import filter_child_candidates
 from place_identity import ensure_ids
-from test_backend_intent_guards import BASE, condition, interpret, plan
+from test_backend_intent_guards import BASE, condition, interpret, plan, consent_fields
 
 
 def catalogue(monkeypatch, kind='카페', name='합성 카페'):
@@ -62,15 +62,17 @@ def test_i01_clarified_activity_keeps_adverbial_required_condition(monkeypatch, 
 @pytest.mark.parametrize('conditions,expected', [([], 422),
     ([condition(required=False)], 422), ([condition(value=False)], 422), ([condition()], 200)])
 def test_i02_all_or_branches_share_the_same_required_condition(monkeypatch, text, conditions, expected):
+    # v13 recovers even the sampled missing/soft/reversed model payload from
+    # the complete source before a model call; no hard source atom is lost.
     result = interpret(monkeypatch, text, plan((text, ['카페', '박물관'], conditions)))
-    assert result.status_code == expected, result.json
-    if expected == 422:
-        assert result.json['metadata']['failure_code'] == 'intent_dropped_condition'
-    else:
-        catalogue(monkeypatch)
-        denied = app.app.test_client().post('/recommend/spot', json={**BASE,
-            'user_text': text, 'intent_token': result.json['intent_token']})
-        assert denied.status_code == 422 and denied.json['reason'] == 'unverified_conditions'
+    assert result.status_code == 200, result.json
+    for alt in result.json['travel_request']['stages'][0]['alternatives']:
+        assert alt['conditions'][0]['field'] == 'indoor'
+        assert alt['conditions'][0]['value'] is True and alt['conditions'][0]['required'] is True
+    catalogue(monkeypatch)
+    denied = app.app.test_client().post('/recommend/spot', json={**BASE,
+        'user_text': text, 'intent_token': result.json['intent_token']})
+    assert denied.status_code == 422 and denied.json['reason'] == 'unverified_conditions'
 
 
 @pytest.mark.parametrize('text', ['실내 카페를 선호해요', '실내 카페면 좋겠어요',
@@ -89,9 +91,11 @@ def test_i03_explicit_preference_is_not_promoted_to_required(monkeypatch, text):
 def test_i04_branch_conditions_cannot_be_discarded_or_applied_to_the_whole_or(monkeypatch, text):
     kinds = ['박물관', '공원'] if '박물관' in text else ['카페', '공원']
     result = interpret(monkeypatch, text, plan((text, kinds, [])), model_calls=0)
-    assert result.status_code == 422, result.json
-    assert result.json['metadata']['failure_code'] == 'intent_alternative_condition_scope'
-    assert 'intent_token' not in result.json
+    assert result.status_code == 200, result.json
+    stage = result.json['travel_request']['stages'][0]
+    assert not stage['conditions']
+    assert stage['alternatives'][0]['conditions'][0]['field'] == 'indoor'
+    assert all(c['field'] != 'indoor' for c in stage['alternatives'][1]['conditions'])
 
 
 @pytest.mark.parametrize('text', ['나들이는 반드시 실내 카페',
@@ -150,12 +154,12 @@ def test_or_on_another_visit_does_not_hide_the_first_required_condition(monkeypa
 
 def test_each_or_group_keeps_its_own_common_condition(monkeypatch):
     text = '실내 카페 또는 실내 박물관 다음 야외 공원'
-    raw = plan(('카페 또는 실내 박물관', ['카페', '박물관'], [condition()]),
-               ('공원', ['공원'], [condition('outdoor', quote='야외')]))
-    assert interpret(monkeypatch, text, raw, mode='course').status_code == 200
-    bad = copy.deepcopy(raw)
-    bad['stages'][0]['conditions'] = []
-    assert interpret(monkeypatch, text, bad, mode='course').status_code == 422
+    raw = plan(('카페 또는 실내 박물관', ['카페', '박물관'], []), ('공원', ['공원'], []))
+    result = interpret(monkeypatch, text, raw, mode='course')
+    assert result.status_code == 200, result.json
+    first, second = result.json['travel_request']['stages']
+    assert all(a['conditions'][0]['field'] == 'indoor' for a in first['alternatives'])
+    assert second['conditions'][0]['field'] == 'outdoor'
 
 
 def test_longer_first_quote_does_not_reassign_the_next_visit_to_its_substring(monkeypatch):
