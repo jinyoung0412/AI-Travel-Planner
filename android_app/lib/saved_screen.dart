@@ -1,4 +1,3 @@
-import 'choice_condition_notice.dart';
 import 'package:flutter/material.dart';
 import 'place_map_button.dart';
 import 'course_timeline.dart';
@@ -430,7 +429,6 @@ class _SpotCard extends StatelessWidget {
                   ),
                 ),
               ],
-              ChoiceConditionNotice(place: spot),
               const SizedBox(height: 12),
               Align(
                 alignment: Alignment.centerLeft,

@@ -107,6 +107,16 @@ Future<void> select(WidgetTester t, String id) async {
   await t.pump();
 }
 
+void expectNoResultExplanation(Map<String, dynamic> place) {
+  expect(find.textContaining('선택 대안:'), findsNothing);
+  expect(find.textContaining('확인 필요:'), findsNothing);
+  expect(find.text('미확인 조건에 동의하고 포함한 결과예요.'), findsNothing);
+  final reason = (place['travel_explanation'] as Map?)?['reason'];
+  if (reason is String && reason.isNotEmpty) {
+    expect(find.text(reason), findsNothing);
+  }
+}
+
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
   testWidgets(
@@ -118,8 +128,7 @@ void main() {
       expect(find.byType(CourseResultScreen), findsNothing);
       expect(find.text('코스로 추천할까요?'), findsNothing);
       expect(find.text('합성 공원'), findsOneWidget);
-      expect(find.text('선택 대안: 공원'), findsOneWidget);
-      expect(find.textContaining('확인 필요:'), findsNothing);
+      expectNoResultExplanation(fixture('F01-safe-park-200')['places'][0]);
       expect(find.byType(AlertDialog), findsNothing);
       expect(find.text('미확인 대안도 보기'), findsOneWidget);
       expect(s.requests.single.acceptUnverified, false);
@@ -143,7 +152,7 @@ void main() {
     expect(find.text('합성 공원'), findsOneWidget);
   });
   testWidgets(
-    'C04: scoped opt-in reuses signed request and displays unknown history',
+    'C04: scoped opt-in reuses signed request without post-result explanations',
     (t) async {
       final s = Source();
       await start(t, s);
@@ -162,8 +171,7 @@ void main() {
       expect(last.consentPlanId, 'example-v13-plan-nonce');
       expect(last.acceptedConditionIds, ['s1.a1.c1']);
       expect(find.text('합성 카페'), findsOneWidget);
-      expect(find.text('확인 필요: 실내 여부 미확인'), findsOneWidget);
-      expect(find.text('미확인 조건에 동의하고 포함한 결과예요.'), findsOneWidget);
+      expectNoResultExplanation(fixture('F03-cafe-scoped-200')['places'][0]);
     },
   );
   testWidgets('C05: unknown-only 422 offers scoped consent, not legacy bool', (
@@ -298,8 +306,8 @@ void main() {
       );
       await t.pumpWidget(const MaterialApp(home: SavedScreen()));
       await t.pumpAndSettle();
-      expect(find.text('선택 대안: 카페'), findsOneWidget);
-      expect(find.text('확인 필요: 실내 여부 미확인'), findsOneWidget);
+      expect(find.text('합성 카페 갱신'), findsOneWidget);
+      expectNoResultExplanation(cafe);
     },
   );
   testWidgets(
@@ -318,12 +326,16 @@ void main() {
       final saved = (await LocalStorageService.getSavedCourses()).single;
       expect(jsonEncode(saved), isNot(contains('do-not-save')));
       expect((saved['metadata'] as Map).containsKey('consent_offer'), false);
+      expect(
+        saved['spots'][0]['travel_explanation'],
+        places.single['travel_explanation'],
+      );
       await t.pumpWidget(const MaterialApp(home: SavedScreen()));
       await t.pumpAndSettle();
       await tap(t, '코스 (1)');
       await tap(t, '코스 보기');
-      expect(find.text('선택 대안: 카페'), findsOneWidget);
-      expect(find.textContaining('동의하고 포함'), findsOneWidget);
+      expect(find.text('합성 카페'), findsOneWidget);
+      expectNoResultExplanation(places.single);
     },
   );
   test(
@@ -382,6 +394,7 @@ void main() {
         find.byType(CourseResultScreen),
       );
       expect(screen.courses.single.length, 2);
+      expectNoResultExplanation(park);
       expect(s.requests.single.count, 1);
       expect(s.requests.single.mode, 'course');
       expect(s.requests.single.slotTypes, isEmpty);

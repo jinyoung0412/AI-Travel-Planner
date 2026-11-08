@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:ai_travel_app/input_screen.dart';
+import 'package:ai_travel_app/spot_result_screen.dart';
 import 'package:ai_travel_app/travel_data.dart';
 import 'package:ai_travel_app/recommendation_source.dart';
 import 'compound_choice_flow_test.dart' as support;
@@ -97,11 +98,17 @@ void main() {
           expect(source.requests.length, 2);
           expect(source.requests.last.acceptUnverified, true);
           expect(source.requests.last.acceptedConditionIds, isEmpty);
-          expect(find.textContaining('선택 대안:'), findsWidgets);
         } else {
-          expect(find.textContaining('선택 대안:'), findsWidgets);
           expect(find.text('조건을 바꿔볼까요?'), findsNothing);
         }
+        final result = actual(
+          label,
+          label == 'manual_plain' ? 'accepted' : 'base',
+        );
+        final firstPlace = support.copy((result['places'] as List).first);
+        expect(find.byType(SpotResultScreen), findsOneWidget);
+        expect(find.text(firstPlace['name'] as String), findsOneWidget);
+        support.expectNoResultExplanation(firstPlace);
       },
     );
     test('J11 control: removing only manual atom leaves normal $label', () {
