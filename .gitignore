@@ -26,3 +26,7 @@ error_log.txt
 *.db.backup-*
 *.legacy.bak
 *.csv.bak
+
+# Crawled place data (not redistributable)
+Flask_server/places.db
+Preprocess/pilots/homonym_5.json

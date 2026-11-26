@@ -955,6 +955,8 @@ def recommend_course():
 
 
 if __name__ == '__main__':
+    if not Path(DB_PATH).is_file():
+        raise SystemExit(f'places.db 없음: {DB_PATH} (README "데이터 준비" 참고, 또는 PLACES_DB_PATH 지정)')
     app.run(host=os.getenv('FLASK_HOST', '127.0.0.1'),
             port=int(os.getenv('FLASK_PORT', '5001')),
             debug=os.getenv('FLASK_DEBUG', '').lower() in ('1', 'true'))

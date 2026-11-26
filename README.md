@@ -37,6 +37,22 @@ scripts/                      키 없는 통합 검사·읽기 전용 DB 감사
 
 Flutter → Node (`8080`) → Flask (`5001`) 순서로 추천을 요청합니다. Claude는 태그 제안·자유 입력 해석·키워드 확장에 사용합니다. 군집화는 선택적 진단이며 코스 개수를 제한하지 않습니다.
 
+## 데이터 준비
+
+수집한 장소 DB는 재배포할 수 없는 데이터라 이 레포에 포함하지 않습니다(`.gitignore` 등록). 아래 두 파일은 팀 내부 공유 경로(`<팀 공유 드라이브>`)에서 받아 둡니다.
+
+| 파일 | 위치 | SHA-256 |
+|---|---|---|
+| 장소 DB | `Flask_server/places.db` (또는 환경변수 `PLACES_DB_PATH`로 경로 지정) | `6e51a45748c26ef6d4239974950098291249246b5f0ae0146b919fabe9d6b3be` |
+| 파일럿 표본 | `Preprocess/pilots/homonym_5.json` | `3784c7b8f22365c3033244860ba79b5bb1b9b1dc6a4fd70ba09fe72e85812faa` |
+
+```bash
+shasum -a 256 Flask_server/places.db Preprocess/pilots/homonym_5.json   # macOS
+sha256sum Flask_server/places.db Preprocess/pilots/homonym_5.json       # Linux
+```
+
+파일이 없으면 이를 읽는 pytest는 `places.db not present; see README 데이터 준비` 사유로 skip되고, Flask 서버는 시작 시 오류 메시지를 출력하고 종료합니다.
+
 ## 개발 환경과 실행
 
 저장소 루트에서 시작합니다. Python 3.10 이상, Node 22 이상, Flutter 3.38 이상/Dart 3.10 이상이 필요합니다(실기기 빌드 확인: Flutter 3.41.7/Dart 3.11.5). 아래 의존성 설치를 순서대로 마친 뒤 Flask, Node, Flutter 실행 명령은 각각 별도 터미널에서 실행합니다.
