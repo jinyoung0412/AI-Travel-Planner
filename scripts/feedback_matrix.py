@@ -37,6 +37,8 @@ FROZEN = {
 
 
 def digest(path):
+    if not path.exists():
+        raise FileNotFoundError(f'{path} 없음: 수집 데이터는 레포에 포함되지 않습니다. README의 "데이터 준비" 참고')
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
